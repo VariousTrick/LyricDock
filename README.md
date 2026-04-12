@@ -25,6 +25,10 @@
 - `开发计划.md`
   当前开发计划
 
+## 资源来源
+
+- 程序图标来源于 iconfont.cn 用户页面 [https://www.iconfont.cn/user/detail?spm=a313x.user_detail.i1.6.23913a81uJvglA&userViewType=activity&uid=942&nid=oUuw5uwrsXDY](https://www.iconfont.cn/user/detail?spm=a313x.user_detail.i1.6.23913a81uJvglA&userViewType=activity&uid=942&nid=oUuw5uwrsXDY)，作者/用户名为“不苳”
+
 ## 当前能做什么
 
 ### 1. 抓取当前歌曲歌词
