@@ -177,22 +177,22 @@ impl MprisClient {
 }
 
 #[derive(Debug)]
-struct SomelyricTray {
+struct LyricDockTray {
     locked: bool,
     preview_path: String,
     preview_state: Arc<Mutex<PreviewData>>,
 }
 
-impl ksni::Tray for SomelyricTray {
+impl ksni::Tray for LyricDockTray {
     fn id(&self) -> String {
-        "somelyric".into()
+        "lyricdock".into()
     }
 
     fn title(&self) -> String {
         if self.locked {
-            "Somelyric 已锁定".into()
+            "LyricDock 已锁定".into()
         } else {
-            "Somelyric 可编辑".into()
+            "LyricDock 可编辑".into()
         }
     }
 
@@ -202,7 +202,7 @@ impl ksni::Tray for SomelyricTray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "Somelyric".into(),
+            title: "LyricDock".into(),
             description: if self.locked {
                 "桌面歌词当前处于锁定状态".into()
             } else {
@@ -331,7 +331,7 @@ fn main() -> Result<()> {
     let interaction_state = Rc::new(RefCell::new(InteractionState::default()));
     let runtime_state = Rc::new(RefCell::new(RuntimeState::default()));
     let mpris_client = Rc::new(MprisClient::new());
-    let tray_handle = SomelyricTray {
+    let tray_handle = LyricDockTray {
         locked: initial_preview.locked.unwrap_or(false),
         preview_path: preview_path.to_string_lossy().into_owned(),
         preview_state: Arc::clone(&tray_preview_state),
@@ -346,7 +346,7 @@ fn main() -> Result<()> {
         .layer(Layer::Overlay)
         .anchor(AnchorEdges::empty().with_top().with_left())
         .exclusive_zone(0)
-        .namespace("somelyric-overlay")
+        .namespace("lyricdock-overlay")
         .keyboard_interactivity(KeyboardInteractivity::None)
         .output_policy(OutputPolicy::PrimaryOnly)
         .build()?;
@@ -628,7 +628,7 @@ fn main() -> Result<()> {
 
             if let Ok(guard) = tray_state_for_timer.lock() {
                 if let Some(handle) = guard.as_ref() {
-                    let _ = handle.update(|tray: &mut SomelyricTray| {
+                    let _ = handle.update(|tray: &mut LyricDockTray| {
                         tray.locked = render.locked;
                     });
                 }

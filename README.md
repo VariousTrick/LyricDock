@@ -1,6 +1,6 @@
-# somelyric
+# LyricDock
 
-这是一个给 `niri / Wayland` 使用的桌面歌词实验项目。
+这是一个给 `niri / Wayland` 使用的桌面歌词项目。
 
 目前已经完成两条基础验证：
 
@@ -49,7 +49,7 @@ cargo run
 
 ## 当前调试方式
 
-运行程序后，直接修改 [调试面板.json](/home/Arch/Downloads/vscode/somelyric/调试面板.json)：
+运行程序后，直接修改 [调试面板.json](/home/Arch/Downloads/vscode/LyricDock/调试面板.json)：
 
 - `locked`
 - `panel_width`
@@ -75,7 +75,7 @@ cargo run
 
 ## 当前托盘能力
 
-- 托盘图标改为你选的两版 SVG 图标
+- 托盘图标改为你选的两版 PNG 图标
 - 可以通过托盘菜单锁定歌词
 - 锁定后可以通过托盘再次解锁
 - 也可以通过面板上的“锁定”按钮进入锁定状态
@@ -93,6 +93,7 @@ cargo run
 
 当前版本仍有这些限制：
 
+- 面板锁定时的鼠标穿透没有单独实现，但当前交互已经满足使用需求，后续不再为此继续修改
 - 进度高亮是“按行时间”推进，暂未实现逐字 karaoke
 - 行2默认作为下一句预告，暂未做翻译行对齐
 - 拉词流程仍使用外部脚本调用，后续可改为异步任务
