@@ -1,9 +1,9 @@
 {
-  "locked": false,
-  "panel_width": 790,
-  "panel_height": 146,
-  "panel_x": 1002,
-  "panel_y": 505,
+  "locked": true,
+  "panel_width": 718,
+  "panel_height": 176,
+  "panel_x": 976,
+  "panel_y": 517,
   "font_scale": 4,
-  "palette_idx": 2
+  "palette_color": null
 }

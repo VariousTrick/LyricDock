@@ -34,7 +34,7 @@ struct PreviewData {
     panel_x: Option<i32>,
     panel_y: Option<i32>,
     font_scale: Option<i32>,
-    palette_idx: Option<i32>,
+    palette_color: Option<String>,
 }
 
 impl Default for PreviewData {
@@ -46,7 +46,7 @@ impl Default for PreviewData {
             panel_x: Some(36),
             panel_y: Some(24),
             font_scale: Some(0),
-            palette_idx: Some(0),
+            palette_color: Some("#56ffc1".to_string()),
         }
     }
 }
@@ -90,7 +90,7 @@ struct RenderState {
     offset_1: f32,
     offset_2: f32,
     font_scale: i32,
-    palette_idx: i32,
+    palette_color: String,
 }
 
 #[derive(Debug, Clone)]
@@ -397,13 +397,14 @@ fn main() -> Result<()> {
         let tray_preview_state = Arc::clone(&tray_preview_state);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback_with_args("request-set-palette", move |args, _| {
-                let palette_idx = value_to_i32(args.first()).clamp(0, 3);
-                let mut preview = preview_state.borrow_mut();
-                preview.palette_idx = Some(palette_idx);
-                if let Ok(mut tray_preview) = tray_preview_state.lock() {
-                    *tray_preview = preview.clone();
+                if let Some(Value::String(color_str)) = args.first() {
+                    let mut preview = preview_state.borrow_mut();
+                    preview.palette_color = Some(color_str.to_string());
+                    if let Ok(mut tray_preview) = tray_preview_state.lock() {
+                        *tray_preview = preview.clone();
+                    }
+                    write_preview_data(&preview_path_for_palette, &preview);
                 }
-                write_preview_data(&preview_path_for_palette, &preview);
                 true
             });
     }
@@ -550,7 +551,7 @@ fn main() -> Result<()> {
                 offset_1: 0.0,
                 offset_2: 0.0,
                 font_scale: preview.font_scale.unwrap_or(0),
-                palette_idx: preview.palette_idx.unwrap_or(0),
+                palette_color: preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string()),
             });
             render.locked = preview.locked.unwrap_or(false);
             render.width = preview.panel_width.unwrap_or(640);
@@ -558,7 +559,7 @@ fn main() -> Result<()> {
             render.x = preview.panel_x.unwrap_or(36).max(0);
             render.y = preview.panel_y.unwrap_or(24).max(0);
             render.font_scale = preview.font_scale.unwrap_or(0);
-            render.palette_idx = preview.palette_idx.unwrap_or(0);
+            render.palette_color = preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string());
             render
         } else {
             let playback = mpris_for_timer
@@ -599,7 +600,7 @@ fn main() -> Result<()> {
                 offset_1,
                 offset_2,
                 font_scale: preview.font_scale.unwrap_or(0),
-                palette_idx: preview.palette_idx.unwrap_or(0),
+                palette_color: preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string()),
             }
         };
 
@@ -625,7 +626,7 @@ fn main() -> Result<()> {
                 let _ = component.set_property("offset_1", Value::Number(render.offset_1 as f64));
                 let _ = component.set_property("offset_2", Value::Number(render.offset_2 as f64));
                 let _ = component.set_property("font_scale", Value::Number(render.font_scale as f64));
-                let _ = component.set_property("palette_idx", Value::Number(render.palette_idx as f64));
+                let _ = component.set_property("palette_color", Value::String(render.palette_color.clone().into()));
 
                 surface.layer_surface().set_size(render.width, render.height);
                 surface
@@ -720,8 +721,8 @@ fn apply_preview_properties(
         Value::Number(preview.font_scale.unwrap_or(0) as f64),
     );
     let _ = component.set_property(
-        "palette_idx",
-        Value::Number(preview.palette_idx.unwrap_or(0) as f64),
+        "palette_color",
+        Value::String(preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string()).into()),
     );
 }
 
@@ -900,6 +901,41 @@ fn parse_timestamp(tag: &str) -> Option<u64> {
     };
 
     Some(minutes * 60_000 + seconds * 1_000 + millis)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let h = h % 360.0;
+    let s = s.clamp(0.0, 1.0);
+    let v = v.clamp(0.0, 1.0);
+
+    let c = v * s;
+    let h_prime = h / 60.0;
+    let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
+
+    let (r1, g1, b1) = if h_prime < 1.0 {
+        (c, x, 0.0)
+    } else if h_prime < 2.0 {
+        (x, c, 0.0)
+    } else if h_prime < 3.0 {
+        (0.0, c, x)
+    } else if h_prime < 4.0 {
+        (0.0, x, c)
+    } else if h_prime < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    let m = v - c;
+    let r = ((r1 + m) * 255.0) as u8;
+    let g = ((g1 + m) * 255.0) as u8;
+    let b = ((b1 + m) * 255.0) as u8;
+    (r, g, b)
+}
+
+fn hsv_to_hex_color(h: f32, s: f32, v: f32) -> String {
+    let (r, g, b) = hsv_to_rgb(h, s, v);
+    format!("#{:02x}{:02x}{:02x}", r, g, b)
 }
 
 fn lyric_pair_for_position(lines: &[LyricLine], position_ms: u64) -> LyricRenderPair {

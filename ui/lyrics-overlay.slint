@@ -1,7 +1,58 @@
+component ToolbarIconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label: "";
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+
+    callback clicked();
+
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        touch_area.clicked();
+    }
+
+    background: !root.enabled
+        ? #ffffff08
+        : touch_area.pressed
+            ? #ffffff2f
+            : touch_area.has-hover
+                ? #ffffff1d
+                : root.selected
+                    ? #ffffff16
+                    : #00000000;
+    border-width: root.selected ? 1px : 0px;
+    border-color: #ffffff30;
+    animate background, border-color { duration: 120ms; easing: ease-out; }
+
+    icon_image := Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 13px;
+        height: 13px;
+        source: root.icon;
+        image-fit: contain;
+        colorize: #f8fbff;
+        accessible-role: none;
+    }
+
+    touch_area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 export component LyricsOverlay inherits Window {
     callback request-lock();
     callback request-font-step(step: int);
-    callback request-set-palette(index: int);
+    callback request-set-palette(color: string);
     callback begin-move();
     callback request-move(dx: length, dy: length);
     callback end-move();
@@ -13,7 +64,7 @@ export component LyricsOverlay inherits Window {
     in property <int> panel_width: 640;
     in property <int> panel_height: 112;
     in property <int> font_scale: 0;
-    in property <int> palette_idx: 0;
+    in property <string> palette_color: "#56ffc1";
     private property <bool> palette_open: false;
     in property <string> line_1: "";
     in property <string> line_2: "";
@@ -25,7 +76,7 @@ export component LyricsOverlay inherits Window {
     in property <float> offset_2: 0.0;
 
     private property <string> lyric_font: "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif";
-    private property <length> toolbar_h: locked ? 0px : 28px;
+    private property <length> toolbar_h: locked ? 0px : 30px;
     private property <length> content_left: 12px;
     private property <length> content_right: 12px;
     private property <length> content_top: toolbar_h + 6px;
@@ -33,22 +84,8 @@ export component LyricsOverlay inherits Window {
     private property <length> primary_font_size: Math.max(18px, (locked ? 32px : 26px) + font_scale * 1px);
     private property <length> secondary_font_size: Math.max(14px, (locked ? 22px : 18px) + font_scale * 1px);
 
-    private property <brush> primary_fill:
-        palette_idx == 1
-            ? @linear-gradient(180deg, #fff7e8 0%, #ffd27d 55%, #ff9800 100%)
-        : palette_idx == 2
-            ? @linear-gradient(180deg, #f2f8ff 0%, #95ccff 55%, #2e8fff 100%)
-        : palette_idx == 3
-            ? @linear-gradient(180deg, #fff1f6 0%, #ff9ebd 55%, #ff4f84 100%)
-            : @linear-gradient(180deg, #f7fffb 0%, #56ffc1 56%, #00d17b 100%);
-    private property <brush> secondary_fill:
-        palette_idx == 1
-            ? @linear-gradient(180deg, #fffaf2 0%, #f8d7a4 100%)
-        : palette_idx == 2
-            ? @linear-gradient(180deg, #f8fbff 0%, #bfd9f8 100%)
-        : palette_idx == 3
-            ? @linear-gradient(180deg, #fff4f8 0%, #f4bfd2 100%)
-            : @linear-gradient(180deg, #ffffff 0%, #d5dde6 100%);
+    private property <brush> primary_fill: @linear-gradient(180deg, #56ffc1 0%, #56ffc1 55%, #56ffc1 100%);
+    private property <brush> secondary_fill: @linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.6) 100%);
     private property <brush> primary_unplayed_fill: @linear-gradient(180deg, #f8fbff 0%, #bfcad6 100%);
     private property <brush> secondary_unplayed_fill: @linear-gradient(180deg, #eef3f8 0%, #a8b2bf 100%);
 
@@ -67,108 +104,46 @@ export component LyricsOverlay inherits Window {
             y: 4px;
             width: parent.width - 16px;
             height: toolbar_h - 4px;
-            background: #ffffff14;
+            background: #ffffff12;
             border-width: 1px;
-            border-color: #ffffff1f;
+            border-color: #ffffff18;
 
-            Rectangle {
+            HorizontalLayout {
                 x: 8px;
-                y: 3px;
-                width: 44px;
-                height: parent.height - 6px;
-                background: lock_touch.pressed ? #00000068 : lock_touch.has-hover ? #ffffff2a : #00000038;
-                animate background { duration: 120ms; easing: ease-out; }
+                y: 2px;
+                width: parent.width - 16px;
+                height: parent.height - 4px;
+                spacing: 4px;
+                alignment: end;
 
-                Text {
-                    text: "锁定";
-                    color: #f8fbff;
-                    font-family: lyric_font;
-                    font-size: 12px;
-                    font-weight: 600;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                lock_touch := TouchArea {
-                    mouse-cursor: pointer;
+                ToolbarIconButton {
+                    icon: @image-url("../assets/toolbar-lock.svg");
+                    label: "锁定歌词";
                     clicked => {
                         root.request-lock();
                     }
                 }
-            }
 
-            Rectangle {
-                x: parent.width - 110px;
-                y: 3px;
-                width: 28px;
-                height: parent.height - 6px;
-                background: font_minus_touch.pressed ? #00000068 : font_minus_touch.has-hover ? #ffffff2a : #00000038;
-                animate background { duration: 120ms; easing: ease-out; }
-
-                Text {
-                    text: "A-";
-                    color: #f8fbff;
-                    font-family: lyric_font;
-                    font-size: 12px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                font_minus_touch := TouchArea {
-                    mouse-cursor: pointer;
+                ToolbarIconButton {
+                    icon: @image-url("../assets/toolbar-minus.svg");
+                    label: "缩小歌词";
                     clicked => {
                         root.request-font-step(-1);
                     }
                 }
-            }
 
-            Rectangle {
-                x: parent.width - 78px;
-                y: 3px;
-                width: 28px;
-                height: parent.height - 6px;
-                background: font_plus_touch.pressed ? #00000068 : font_plus_touch.has-hover ? #ffffff2a : #00000038;
-                animate background { duration: 120ms; easing: ease-out; }
-
-                Text {
-                    text: "A+";
-                    color: #f8fbff;
-                    font-family: lyric_font;
-                    font-size: 12px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                font_plus_touch := TouchArea {
-                    mouse-cursor: pointer;
+                ToolbarIconButton {
+                    icon: @image-url("../assets/toolbar-plus.svg");
+                    label: "放大歌词";
                     clicked => {
                         root.request-font-step(1);
                     }
                 }
-            }
 
-            Rectangle {
-                x: parent.width - 46px;
-                y: 3px;
-                width: 38px;
-                height: parent.height - 6px;
-                background: palette_touch.pressed ? #00000068 : palette_touch.has-hover ? #ffffff2a : #00000038;
-                animate background { duration: 120ms; easing: ease-out; }
-
-                Text {
-                    text: "配色";
-                    color: #f8fbff;
-                    font-family: lyric_font;
-                    font-size: 11px;
-                    font-weight: 600;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                palette_touch := TouchArea {
-                    mouse-cursor: pointer;
+                ToolbarIconButton {
+                    icon: @image-url("../assets/toolbar-palette.svg");
+                    label: "切换配色";
+                    selected: palette_open;
                     clicked => {
                         root.palette_open = !root.palette_open;
                     }
@@ -177,87 +152,52 @@ export component LyricsOverlay inherits Window {
         }
 
         if !locked && palette_open : Rectangle {
-            x: parent.width - 166px;
-            y: toolbar_h + 4px;
-            width: 154px;
-            height: 40px;
-            background: #000000c0;
+            x: parent.width - 240px;
+            y: toolbar_h + 5px;
+            width: 228px;
+            height: 48px;
+            background: #000000c8;
             border-width: 1px;
             border-color: #ffffff1f;
+            border-radius: 12px;
 
-            Rectangle {
+            VerticalLayout {
                 x: 8px;
                 y: 8px;
-                width: 28px;
-                height: 24px;
-                background: #56ffc1;
-                border-width: palette_0_touch.pressed || palette_0_touch.has-hover || palette_idx == 0 ? 2px : 1px;
-                border-color: #f8fbff;
-                animate background { duration: 120ms; easing: ease-out; }
+                width: parent.width - 16px;
+                height: parent.height - 16px;
+                spacing: 4px;
 
-                palette_0_touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.request-set-palette(0);
-                        root.palette_open = false;
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+
+                    Text {
+                        text: "颜色: #";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    palette_input := TextInput {
+                        width: 120px;
+                        height: 20px;
+                        text: root.palette_color;
+                        color: #000000;
+                        selection-background-color: #56ffc1;
+                        font-size: 12px;
+                        input-type: text;
+                        accepted => {
+                            root.request-set-palette(self.text);
+                            root.palette_open = false;
+                        }
                     }
                 }
-            }
 
-            Rectangle {
-                x: 42px;
-                y: 8px;
-                width: 28px;
-                height: 24px;
-                background: #ff9800;
-                border-width: palette_1_touch.pressed || palette_1_touch.has-hover || palette_idx == 1 ? 2px : 1px;
-                border-color: #f8fbff;
-                animate background { duration: 120ms; easing: ease-out; }
-
-                palette_1_touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.request-set-palette(1);
-                        root.palette_open = false;
-                    }
-                }
-            }
-
-            Rectangle {
-                x: 76px;
-                y: 8px;
-                width: 28px;
-                height: 24px;
-                background: #2e8fff;
-                border-width: palette_2_touch.pressed || palette_2_touch.has-hover || palette_idx == 2 ? 2px : 1px;
-                border-color: #f8fbff;
-                animate background { duration: 120ms; easing: ease-out; }
-
-                palette_2_touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.request-set-palette(2);
-                        root.palette_open = false;
-                    }
-                }
-            }
-
-            Rectangle {
-                x: 110px;
-                y: 8px;
-                width: 28px;
-                height: 24px;
-                background: #ff4f84;
-                border-width: palette_3_touch.pressed || palette_3_touch.has-hover || palette_idx == 3 ? 2px : 1px;
-                border-color: #f8fbff;
-                animate background { duration: 120ms; easing: ease-out; }
-
-                palette_3_touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.request-set-palette(3);
-                        root.palette_open = false;
-                    }
+                Text {
+                    text: "按 Enter 确认";
+                    color: #ffffff99;
+                    font-size: 10px;
                 }
             }
         }
