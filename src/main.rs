@@ -9,6 +9,7 @@ use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -529,12 +530,6 @@ fn main() -> Result<()> {
         let interaction = interaction_state_for_timer.borrow().clone();
 
         let mut runtime = runtime_state_for_timer.borrow_mut();
-        let font_scale = preview.font_scale.unwrap_or(0) as f32;
-        let primary_font = (if preview.locked.unwrap_or(false) { 32.0 } else { 26.0 } + font_scale)
-            .max(18.0);
-        let secondary_font = (if preview.locked.unwrap_or(false) { 22.0 } else { 18.0 } + font_scale)
-            .max(14.0);
-        let available_width = (preview.panel_width.unwrap_or(640) as f32 - 24.0).max(120.0);
         let render = if interaction.dragging || interaction.resizing || interaction.dirty {
             let mut render = runtime.last_render.clone().unwrap_or(RenderState {
                 locked: preview.locked.unwrap_or(false),
@@ -572,19 +567,6 @@ fn main() -> Result<()> {
                 Path::new(LYRICS_DIR),
                 Path::new("scripts/fetch-current-song-lyrics.js"),
             );
-            let (offset_1, scroll_1) = line_motion(
-                &lyric_pair.line_1,
-                primary_font,
-                available_width,
-                lyric_pair.progress_1,
-            );
-            let (offset_2, scroll_2) = line_motion(
-                &lyric_pair.line_2,
-                secondary_font,
-                available_width,
-                lyric_pair.progress_2,
-            );
-
             RenderState {
                 locked: preview.locked.unwrap_or(false),
                 width: preview.panel_width.unwrap_or(640),
@@ -595,10 +577,10 @@ fn main() -> Result<()> {
                 line_2: lyric_pair.line_2,
                 progress_1: lyric_pair.progress_1,
                 progress_2: lyric_pair.progress_2,
-                scroll_1,
-                scroll_2,
-                offset_1,
-                offset_2,
+                scroll_1: 0.0,
+                scroll_2: 0.0,
+                offset_1: 0.0,
+                offset_2: 0.0,
                 font_scale: preview.font_scale.unwrap_or(0),
                 palette_color: preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string()),
             }
@@ -1072,50 +1054,17 @@ fn write_preview_data(path: &Path, preview: &PreviewData) {
 }
 
 fn tray_icon() -> ksni::Icon {
-    let width = 22_i32;
-    let height = 22_i32;
-    let mut data = vec![0_u8; (width * height * 4) as usize];
-
-    let bg = [0xFF, 0xFF, 0xFF, 0xFF];
-    let fill = [0xFF, 0x2C, 0x2C, 0x2C];
-
-    let shape = [
-        "......................",
-        "..##############......",
-        "..##############......",
-        "..##..........##......",
-        "..##..........##......",
-        "..##..........##..###.",
-        "..##..........##.#####",
-        "..##..#####...##.#####",
-        "..##..#####...##..###.",
-        "..##..##......##......",
-        "..##..##......##......",
-        "..##..##......##......",
-        "..##..##......##......",
-        "..##..##########......",
-        "..##..##########......",
-        "..##..................",
-        "..##..................",
-        "..################....",
-        "..################....",
-        "......................",
-        "......................",
-        "......................",
-    ];
-
-    for (y, row) in shape.iter().enumerate() {
-        for (x, ch) in row.chars().enumerate() {
-            let idx = ((y as i32 * width + x as i32) * 4) as usize;
-            if ch == '#' {
-                data[idx..idx + 4].copy_from_slice(&fill);
-            } else if ch == '.' && x >= 2 && x <= 17 && y >= 1 && y <= 18 {
-                data[idx..idx + 4].copy_from_slice(&bg);
-            }
-        }
+    let bytes = include_bytes!("../assets/tray-icon.png");
+    let image = image::load(Cursor::new(bytes), image::ImageFormat::Png)
+        .expect("failed to decode tray icon png")
+        .to_rgba8();
+    let width = image.width() as i32;
+    let height = image.height() as i32;
+    ksni::Icon {
+        width,
+        height,
+        data: image.into_raw(),
     }
-
-    ksni::Icon { width, height, data }
 }
 
 #[derive(Debug, Deserialize)]

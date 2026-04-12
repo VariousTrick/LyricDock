@@ -6,9 +6,9 @@ component ToolbarIconButton inherits Rectangle {
 
     callback clicked();
 
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: root.enabled;
@@ -17,23 +17,23 @@ component ToolbarIconButton inherits Rectangle {
     }
 
     background: !root.enabled
-        ? #ffffff08
+        ? #ffffff0d
         : touch_area.pressed
-            ? #ffffff2f
+            ? #ffffff3a
             : touch_area.has-hover
-                ? #ffffff1d
+                ? #ffffff22
                 : root.selected
-                    ? #ffffff16
+                    ? #ffffff1a
                     : #00000000;
     border-width: root.selected ? 1px : 0px;
-    border-color: #ffffff30;
+    border-color: #ffffff40;
     animate background, border-color { duration: 120ms; easing: ease-out; }
 
     icon_image := Image {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        width: 13px;
-        height: 13px;
+        width: 20px;
+        height: 20px;
         source: root.icon;
         image-fit: contain;
         colorize: #f8fbff;
@@ -76,10 +76,13 @@ export component LyricsOverlay inherits Window {
     in property <float> offset_2: 0.0;
 
     private property <string> lyric_font: "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif";
-    private property <length> toolbar_h: locked ? 0px : 30px;
+    private property <length> toolbar_h: 0px;
+    private property <length> button_area_h: locked ? 0px : 50px;
     private property <length> content_left: 12px;
     private property <length> content_right: 12px;
-    private property <length> content_top: toolbar_h + 6px;
+    private property <length> content_top: 6px;
+    private property <length> content_bottom: 6px + button_area_h;
+    private property <length> available_height: panel_height * 1px - content_top - content_bottom;
     private property <length> lyric_line_width: panel_width * 1px - content_left - content_right;
     private property <length> primary_font_size: Math.max(18px, (locked ? 32px : 26px) + font_scale * 1px);
     private property <length> secondary_font_size: Math.max(14px, (locked ? 22px : 18px) + font_scale * 1px);
@@ -88,33 +91,32 @@ export component LyricsOverlay inherits Window {
     private property <brush> secondary_fill: @linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.6) 100%);
     private property <brush> primary_unplayed_fill: @linear-gradient(180deg, #f8fbff 0%, #bfcad6 100%);
     private property <brush> secondary_unplayed_fill: @linear-gradient(180deg, #eef3f8 0%, #a8b2bf 100%);
+    private property <brush> panel_background: @linear-gradient(180deg, #00000080 0%, #00000095 50%, #000000aa 100%);
 
     background: transparent;
 
     Rectangle {
         width: panel_width * 1px;
         height: panel_height * 1px;
-        background: locked ? #00000000 : #000000aa;
+        background: locked ? #00000000 : panel_background;
         border-width: locked ? 0px : 1px;
-        border-color: #ffffff1f;
-        border-radius: 0px;
+        border-color: #ffffff28;
+        border-radius: 8px;
 
         if !locked : Rectangle {
-            x: 8px;
-            y: 4px;
-            width: parent.width - 16px;
-            height: toolbar_h - 4px;
-            background: #ffffff12;
-            border-width: 1px;
-            border-color: #ffffff18;
+            x: (parent.width - 180px) / 2;
+            y: parent.height - button_area_h;
+            width: 180px;
+            height: button_area_h;
+            background: #00000000;
 
             HorizontalLayout {
-                x: 8px;
-                y: 2px;
-                width: parent.width - 16px;
-                height: parent.height - 4px;
-                spacing: 4px;
-                alignment: end;
+                x: 0px;
+                y: 5px;
+                width: parent.width;
+                height: 40px;
+                spacing: 8px;
+                alignment: center;
 
                 ToolbarIconButton {
                     icon: @image-url("../assets/toolbar-lock.svg");
@@ -151,60 +153,9 @@ export component LyricsOverlay inherits Window {
             }
         }
 
-        if !locked && palette_open : Rectangle {
-            x: parent.width - 240px;
-            y: toolbar_h + 5px;
-            width: 228px;
-            height: 48px;
-            background: #000000c8;
-            border-width: 1px;
-            border-color: #ffffff1f;
-            border-radius: 12px;
-
-            VerticalLayout {
-                x: 8px;
-                y: 8px;
-                width: parent.width - 16px;
-                height: parent.height - 16px;
-                spacing: 4px;
-
-                HorizontalLayout {
-                    spacing: 6px;
-                    alignment: center;
-
-                    Text {
-                        text: "颜色: #";
-                        color: #ffffff;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-
-                    palette_input := TextInput {
-                        width: 120px;
-                        height: 20px;
-                        text: root.palette_color;
-                        color: #000000;
-                        selection-background-color: #56ffc1;
-                        font-size: 12px;
-                        input-type: text;
-                        accepted => {
-                            root.request-set-palette(self.text);
-                            root.palette_open = false;
-                        }
-                    }
-                }
-
-                Text {
-                    text: "按 Enter 确认";
-                    color: #ffffff99;
-                    font-size: 10px;
-                }
-            }
-        }
-
         Text {
-            x: content_left + 1px + offset_1 * 1px - scroll_1 * 1px;
-            y: content_top + 2px;
+            x: content_left;
+            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + 2px;
             width: lyric_line_width;
             text: line_1;
             color: #000000c4;
@@ -218,8 +169,8 @@ export component LyricsOverlay inherits Window {
         }
 
         Text {
-            x: content_left + offset_1 * 1px - scroll_1 * 1px;
-            y: content_top;
+            x: content_left;
+            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2;
             width: lyric_line_width;
             text: line_1;
             color: primary_unplayed_fill;
@@ -237,14 +188,15 @@ export component LyricsOverlay inherits Window {
 
         Rectangle {
             x: content_left;
-            y: content_top;
+            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2;
             width: lyric_line_width * Math.max(0.0, Math.min(progress_1, 1.0));
             height: primary_font_size + 6px;
             clip: true;
             background: #00000000;
+            border-radius: 3px;
 
             Text {
-                x: offset_1 * 1px - scroll_1 * 1px;
+                x: 0px;
                 y: 0px;
                 width: lyric_line_width;
                 text: line_1;
@@ -263,8 +215,8 @@ export component LyricsOverlay inherits Window {
         }
 
         Text {
-            x: content_left + 1px + offset_2 * 1px - scroll_2 * 1px;
-            y: content_top + primary_font_size + 10px;
+            x: content_left;
+            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + primary_font_size + 10px + 1px;
             width: lyric_line_width;
             text: line_2;
             color: #0000009a;
@@ -278,8 +230,8 @@ export component LyricsOverlay inherits Window {
         }
 
         Text {
-            x: content_left + offset_2 * 1px - scroll_2 * 1px;
-            y: content_top + primary_font_size + 8px;
+            x: content_left;
+            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + primary_font_size + 8px;
             width: lyric_line_width;
             text: line_2;
             color: secondary_unplayed_fill;
@@ -297,14 +249,15 @@ export component LyricsOverlay inherits Window {
 
         Rectangle {
             x: content_left;
-            y: content_top + primary_font_size + 8px;
+            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + primary_font_size + 8px;
             width: lyric_line_width * Math.max(0.0, Math.min(progress_2, 1.0));
             height: secondary_font_size + 6px;
             clip: true;
             background: #00000000;
+            border-radius: 2px;
 
             Text {
-                x: offset_2 * 1px - scroll_2 * 1px;
+                x: 0px;
                 y: 0px;
                 width: lyric_line_width;
                 text: line_2;
@@ -328,12 +281,12 @@ export component LyricsOverlay inherits Window {
             width: 10px;
             height: 10px;
             background: #ffffffa8;
+            border-radius: 2px;
         }
 
         if !locked : TouchArea {
-            y: toolbar_h;
             width: parent.width;
-            height: parent.height - toolbar_h;
+            height: parent.height - button_area_h;
             mouse-cursor: move;
             pointer-event(event) => {
                 if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
@@ -367,6 +320,69 @@ export component LyricsOverlay inherits Window {
             moved => {
                 if (self.pressed) {
                     root.request-resize(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
+        }
+
+        if !locked && palette_open : Rectangle {
+            x: (parent.width - 228px) / 2;
+            y: 10px;
+            width: 228px;
+            height: 54px;
+            background: @linear-gradient(180deg, #000000d8 0%, #000000e0 100%);
+            border-width: 1px;
+            border-color: #ffffff2f;
+            border-radius: 8px;
+
+            VerticalLayout {
+                x: 8px;
+                y: 7px;
+                width: parent.width - 16px;
+                height: parent.height - 14px;
+                spacing: 3px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+
+                    Text {
+                        text: "颜色: #";
+                        color: #ffffff;
+                        font-size: 12px;
+                        font-weight: 500;
+                        vertical-alignment: center;
+                    }
+
+                    input_box := Rectangle {
+                        width: 120px;
+                        height: 22px;
+                        background: #111111e6;
+                        border-width: 1px;
+                        border-color: #ffffff26;
+                        border-radius: 4px;
+
+                        palette_input := TextInput {
+                            x: 6px;
+                            y: 2px;
+                            width: parent.width - 12px;
+                            height: parent.height - 4px;
+                            text: root.palette_color;
+                            color: #f8fbff;
+                            selection-background-color: #56ffc1;
+                            font-size: 12px;
+                            input-type: text;
+                            accepted => {
+                                root.request-set-palette(self.text);
+                                root.palette_open = false;
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "按 Enter 确认";
+                    color: #ffffff99;
+                    font-size: 10px;
                 }
             }
         }
