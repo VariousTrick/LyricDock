@@ -1,7 +1,9 @@
 {
   "locked": true,
-  "panel_width": 659,
-  "panel_height": 101,
-  "panel_x": 1269,
-  "panel_y": 348
+  "panel_width": 726,
+  "panel_height": 229,
+  "panel_x": 1035,
+  "panel_y": 458,
+  "font_scale": 3,
+  "palette_idx": 2
 }

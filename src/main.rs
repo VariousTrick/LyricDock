@@ -14,6 +14,7 @@ use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthStr;
 use wayland_backend::client::{Backend as WlBackend, ObjectId as WlObjectId};
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{wl_compositor, wl_region, wl_registry, wl_surface};
@@ -32,6 +33,8 @@ struct PreviewData {
     panel_height: Option<u32>,
     panel_x: Option<i32>,
     panel_y: Option<i32>,
+    font_scale: Option<i32>,
+    palette_idx: Option<i32>,
 }
 
 impl Default for PreviewData {
@@ -39,9 +42,11 @@ impl Default for PreviewData {
         Self {
             locked: Some(false),
             panel_width: Some(640),
-            panel_height: Some(88),
+            panel_height: Some(112),
             panel_x: Some(36),
             panel_y: Some(24),
+            font_scale: Some(0),
+            palette_idx: Some(0),
         }
     }
 }
@@ -80,6 +85,12 @@ struct RenderState {
     line_2: String,
     progress_1: f32,
     progress_2: f32,
+    scroll_1: f32,
+    scroll_2: f32,
+    offset_1: f32,
+    offset_2: f32,
+    font_scale: i32,
+    palette_idx: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -329,7 +340,7 @@ fn main() -> Result<()> {
     let mut shell = Shell::from_file("ui/lyrics-overlay.slint")
         .surface(SURFACE_NAME)
         .width(initial_preview.panel_width.unwrap_or(640))
-        .height(initial_preview.panel_height.unwrap_or(88))
+        .height(initial_preview.panel_height.unwrap_or(112))
         .layer(Layer::Overlay)
         .anchor(AnchorEdges::empty().with_top().with_left())
         .exclusive_zone(0)
@@ -349,10 +360,37 @@ fn main() -> Result<()> {
         let preview_state = Rc::clone(&shared_preview);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback("request-lock", move |_| {
-                update_preview_file(&preview_path_for_lock, |preview| {
-                    preview.locked = Some(true);
-                });
-                *preview_state.borrow_mut() = read_preview_data(&preview_path_for_lock);
+                let mut preview = preview_state.borrow_mut();
+                let next_locked = !preview.locked.unwrap_or(false);
+                preview.locked = Some(next_locked);
+                write_preview_data(&preview_path_for_lock, &preview);
+                true
+            });
+    }
+
+    {
+        let preview_path_for_font = preview_path.clone();
+        let preview_state = Rc::clone(&shared_preview);
+        shell.select(Surface::named(SURFACE_NAME))
+            .on_callback_with_args("request-font-step", move |args, _| {
+                let step = value_to_i32(args.first());
+                let mut preview = preview_state.borrow_mut();
+                let current = preview.font_scale.unwrap_or(0);
+                preview.font_scale = Some((current + step).clamp(-8, 18));
+                write_preview_data(&preview_path_for_font, &preview);
+                true
+            });
+    }
+
+    {
+        let preview_path_for_palette = preview_path.clone();
+        let preview_state = Rc::clone(&shared_preview);
+        shell.select(Surface::named(SURFACE_NAME))
+            .on_callback("request-next-palette", move |_| {
+                let mut preview = preview_state.borrow_mut();
+                let next = (preview.palette_idx.unwrap_or(0) + 1).rem_euclid(4);
+                preview.palette_idx = Some(next);
+                write_preview_data(&preview_path_for_palette, &preview);
                 true
             });
     }
@@ -361,8 +399,10 @@ fn main() -> Result<()> {
         let preview_path_for_move_2 = preview_path.clone();
         let preview_state = Rc::clone(&shared_preview);
         let preview_state_2 = Rc::clone(&shared_preview);
+        let preview_state_3 = Rc::clone(&shared_preview);
         let drag_state = Rc::clone(&drag_state);
         let drag_state_2 = Rc::clone(&drag_state);
+        let drag_state_3 = Rc::clone(&drag_state);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback("begin-move", move |_| {
                 let preview = preview_state.borrow().clone();
@@ -376,12 +416,17 @@ fn main() -> Result<()> {
                 let dx = value_to_i32(args.first());
                 let dy = value_to_i32(args.get(1));
                 if let Some((origin_x, origin_y)) = drag_state_2.borrow().move_origin {
-                    update_preview_file(&preview_path_for_move_2, |preview| {
-                        preview.panel_x = Some((origin_x + dx).max(0));
-                        preview.panel_y = Some((origin_y + dy).max(0));
-                    });
-                    *preview_state_2.borrow_mut() = read_preview_data(&preview_path_for_move_2);
+                    let mut preview = preview_state_2.borrow_mut();
+                    preview.panel_x = Some((origin_x + dx).max(0));
+                    preview.panel_y = Some((origin_y + dy).max(0));
                 }
+                true
+            })
+            .on_callback("end-move", move |_| {
+                let mut drag = drag_state_3.borrow_mut();
+                drag.move_origin = None;
+                let preview = preview_state_3.borrow().clone();
+                write_preview_data(&preview_path_for_move_2, &preview);
                 true
             });
     }
@@ -390,14 +435,16 @@ fn main() -> Result<()> {
         let preview_path_for_resize_2 = preview_path.clone();
         let preview_state = Rc::clone(&shared_preview);
         let preview_state_2 = Rc::clone(&shared_preview);
+        let preview_state_3 = Rc::clone(&shared_preview);
         let drag_state = Rc::clone(&drag_state);
         let drag_state_2 = Rc::clone(&drag_state);
+        let drag_state_3 = Rc::clone(&drag_state);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback("begin-resize", move |_| {
                 let preview = preview_state.borrow().clone();
                 drag_state.borrow_mut().resize_origin = Some((
                     preview.panel_width.unwrap_or(640),
-                    preview.panel_height.unwrap_or(88),
+                    preview.panel_height.unwrap_or(112),
                 ));
                 true
             })
@@ -405,12 +452,17 @@ fn main() -> Result<()> {
                 let dw = value_to_i32(args.first());
                 let dh = value_to_i32(args.get(1));
                 if let Some((origin_w, origin_h)) = drag_state_2.borrow().resize_origin {
-                    update_preview_file(&preview_path_for_resize_2, |preview| {
-                        preview.panel_width = Some(((origin_w as i32 + dw).max(320)) as u32);
-                        preview.panel_height = Some(((origin_h as i32 + dh).max(72)) as u32);
-                    });
-                    *preview_state_2.borrow_mut() = read_preview_data(&preview_path_for_resize_2);
+                    let mut preview = preview_state_2.borrow_mut();
+                    preview.panel_width = Some(((origin_w as i32 + dw).max(320)) as u32);
+                    preview.panel_height = Some(((origin_h as i32 + dh).max(96)) as u32);
                 }
+                true
+            })
+            .on_callback("end-resize", move |_| {
+                let mut drag = drag_state_3.borrow_mut();
+                drag.resize_origin = None;
+                let preview = preview_state_3.borrow().clone();
+                write_preview_data(&preview_path_for_resize_2, &preview);
                 true
             });
     }
@@ -418,14 +470,12 @@ fn main() -> Result<()> {
     let event_loop = shell.event_loop_handle();
     let tray_state = Arc::new(Mutex::new(tray_handle));
     let tray_state_for_timer = Arc::clone(&tray_state);
-    let preview_path_for_timer = preview_path.clone();
     let preview_state_for_timer = Rc::clone(&shared_preview);
     let runtime_state_for_timer = Rc::clone(&runtime_state);
     let mpris_for_timer = Rc::clone(&mpris_client);
 
     event_loop.add_timer(Duration::from_millis(200), move |_, app_state| {
-        let preview = read_preview_data(&preview_path_for_timer);
-        *preview_state_for_timer.borrow_mut() = preview.clone();
+        let preview = preview_state_for_timer.borrow().clone();
 
         let mut runtime = runtime_state_for_timer.borrow_mut();
         let playback = mpris_for_timer
@@ -438,17 +488,41 @@ fn main() -> Result<()> {
             Path::new(LYRICS_DIR),
             Path::new("scripts/fetch-current-song-lyrics.js"),
         );
+        let font_scale = preview.font_scale.unwrap_or(0) as f32;
+        let primary_font = (if preview.locked.unwrap_or(false) { 32.0 } else { 26.0 } + font_scale)
+            .max(18.0);
+        let secondary_font = (if preview.locked.unwrap_or(false) { 22.0 } else { 18.0 } + font_scale)
+            .max(14.0);
+        let available_width = (preview.panel_width.unwrap_or(640) as f32 - 24.0).max(120.0);
+        let (offset_1, scroll_1) = line_motion(
+            &lyric_pair.line_1,
+            primary_font,
+            available_width,
+            lyric_pair.progress_1,
+        );
+        let (offset_2, scroll_2) = line_motion(
+            &lyric_pair.line_2,
+            secondary_font,
+            available_width,
+            lyric_pair.progress_2,
+        );
 
         let render = RenderState {
             locked: preview.locked.unwrap_or(false),
             width: preview.panel_width.unwrap_or(640),
-            height: preview.panel_height.unwrap_or(88),
+            height: preview.panel_height.unwrap_or(112),
             x: preview.panel_x.unwrap_or(36).max(0),
             y: preview.panel_y.unwrap_or(24).max(0),
             line_1: lyric_pair.line_1,
             line_2: lyric_pair.line_2,
             progress_1: lyric_pair.progress_1,
             progress_2: lyric_pair.progress_2,
+            scroll_1,
+            scroll_2,
+            offset_1,
+            offset_2,
+            font_scale: preview.font_scale.unwrap_or(0),
+            palette_idx: preview.palette_idx.unwrap_or(0),
         };
 
         let needs_passthrough_update = runtime.last_locked != Some(render.locked);
@@ -464,6 +538,12 @@ fn main() -> Result<()> {
                 let _ = component.set_property("line_2", shared(Some(&render.line_2)));
                 let _ = component.set_property("progress_1", Value::Number(render.progress_1 as f64));
                 let _ = component.set_property("progress_2", Value::Number(render.progress_2 as f64));
+                let _ = component.set_property("scroll_1", Value::Number(render.scroll_1 as f64));
+                let _ = component.set_property("scroll_2", Value::Number(render.scroll_2 as f64));
+                let _ = component.set_property("offset_1", Value::Number(render.offset_1 as f64));
+                let _ = component.set_property("offset_2", Value::Number(render.offset_2 as f64));
+                let _ = component.set_property("font_scale", Value::Number(render.font_scale as f64));
+                let _ = component.set_property("palette_idx", Value::Number(render.palette_idx as f64));
 
                 surface.layer_surface().set_size(render.width, render.height);
                 surface
@@ -512,7 +592,7 @@ fn main() -> Result<()> {
         surface.set_exclusive_zone(0);
         surface.set_size(
             initial_preview.panel_width.unwrap_or(640),
-            initial_preview.panel_height.unwrap_or(88),
+            initial_preview.panel_height.unwrap_or(112),
         );
         surface.set_margins(Margins::new(
             initial_preview.panel_y.unwrap_or(24),
@@ -555,7 +635,15 @@ fn apply_preview_properties(
     );
     let _ = component.set_property(
         "panel_height",
-        Value::Number(preview.panel_height.unwrap_or(88) as f64),
+        Value::Number(preview.panel_height.unwrap_or(112) as f64),
+    );
+    let _ = component.set_property(
+        "font_scale",
+        Value::Number(preview.font_scale.unwrap_or(0) as f64),
+    );
+    let _ = component.set_property(
+        "palette_idx",
+        Value::Number(preview.palette_idx.unwrap_or(0) as f64),
     );
 }
 
@@ -596,8 +684,8 @@ fn current_lines_for_track(
 
     let artist = track.artists.first().cloned().unwrap_or_default();
     LyricRenderPair {
-        line_1: "未找到歌词".into(),
-        line_2: format!("{} - {}", track.title, artist),
+        line_1: format!("{} - {}", artist, track.title),
+        line_2: "".into(),
         progress_1: 1.0,
         progress_2: 0.0,
     }
@@ -757,12 +845,16 @@ fn lyric_pair_for_position(lines: &[LyricLine], position_ms: u64) -> LyricRender
         .get(current_index)
         .map(|line| line_progress(line, position_ms))
         .unwrap_or(0.0);
+    let progress_2 = lines
+        .get(current_index + 1)
+        .map(|line| line_progress(line, position_ms))
+        .unwrap_or(0.0);
 
     LyricRenderPair {
         line_1: current,
         line_2: next,
         progress_1,
-        progress_2: 0.0,
+        progress_2,
     }
 }
 
@@ -798,6 +890,21 @@ fn line_progress(line: &LyricLine, position_ms: u64) -> f32 {
         return 1.0;
     }
     ((position_ms - line.time_ms) as f32 / duration as f32).clamp(0.0, 1.0)
+}
+
+fn line_motion(text: &str, font_px: f32, available_px: f32, progress: f32) -> (f32, f32) {
+    if text.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let columns = UnicodeWidthStr::width(text) as f32;
+    let text_px = columns * font_px * 0.52;
+    if text_px <= available_px {
+        return ((available_px - text_px) * 0.5, 0.0);
+    }
+
+    let overflow = text_px - available_px;
+    (0.0, overflow * progress.clamp(0.0, 1.0))
 }
 
 fn is_credit_line(text: &str) -> bool {
@@ -842,6 +949,12 @@ fn value_to_i32(value: Option<&Value>) -> i32 {
 
 fn shared(text: Option<&str>) -> Value {
     Value::from(SharedString::from(text.unwrap_or_default()))
+}
+
+fn write_preview_data(path: &Path, preview: &PreviewData) {
+    if let Ok(content) = serde_json::to_string_pretty(preview) {
+        let _ = fs::write(path, content);
+    }
 }
 
 fn tray_icon() -> ksni::Icon {
