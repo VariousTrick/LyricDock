@@ -1,0 +1,22 @@
+{
+  "fetchedAt": "2026-04-12T15:07:10.049Z",
+  "track": {
+    "title": "連藉口都沒有",
+    "album": "辭舊",
+    "artists": [
+      "孙子涵"
+    ],
+    "durationMs": 258000
+  },
+  "query": "连借口都没有 孙子涵",
+  "matched": {
+    "id": 29418652,
+    "name": "连借口都没有",
+    "artists": [
+      "孙子涵"
+    ],
+    "album": "连借口都没有",
+    "durationMs": 257870,
+    "score": 140
+  }
+}
