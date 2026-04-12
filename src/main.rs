@@ -59,6 +59,7 @@ struct TrackInfo {
 #[derive(Debug, Clone)]
 struct LyricLine {
     time_ms: u64,
+    end_time_ms: u64,
     text: String,
 }
 
@@ -77,6 +78,16 @@ struct RenderState {
     y: i32,
     line_1: String,
     line_2: String,
+    progress_1: f32,
+    progress_2: f32,
+}
+
+#[derive(Debug, Clone)]
+struct LyricRenderPair {
+    line_1: String,
+    line_2: String,
+    progress_1: f32,
+    progress_2: f32,
 }
 
 #[derive(Debug, Default)]
@@ -421,7 +432,7 @@ fn main() -> Result<()> {
             .as_ref()
             .as_ref()
             .and_then(|client| client.read_track());
-        let text_pair = current_lines_for_track(
+        let lyric_pair = current_lines_for_track(
             playback.as_ref(),
             &mut runtime,
             Path::new(LYRICS_DIR),
@@ -434,8 +445,10 @@ fn main() -> Result<()> {
             height: preview.panel_height.unwrap_or(88),
             x: preview.panel_x.unwrap_or(36).max(0),
             y: preview.panel_y.unwrap_or(24).max(0),
-            line_1: text_pair.0,
-            line_2: text_pair.1,
+            line_1: lyric_pair.line_1,
+            line_2: lyric_pair.line_2,
+            progress_1: lyric_pair.progress_1,
+            progress_2: lyric_pair.progress_2,
         };
 
         let needs_passthrough_update = runtime.last_locked != Some(render.locked);
@@ -449,6 +462,8 @@ fn main() -> Result<()> {
                 let _ = component.set_property("panel_height", Value::Number(render.height as f64));
                 let _ = component.set_property("line_1", shared(Some(&render.line_1)));
                 let _ = component.set_property("line_2", shared(Some(&render.line_2)));
+                let _ = component.set_property("progress_1", Value::Number(render.progress_1 as f64));
+                let _ = component.set_property("progress_2", Value::Number(render.progress_2 as f64));
 
                 surface.layer_surface().set_size(render.width, render.height);
                 surface
@@ -549,10 +564,15 @@ fn current_lines_for_track(
     runtime: &mut RuntimeState,
     lyrics_dir: &Path,
     fetch_script: &Path,
-) -> (String, String) {
+) -> LyricRenderPair {
     let Some(track) = playback else {
         runtime.active_lyrics = None;
-        return ("正在等待 Spotify...".into(), "".into());
+        return LyricRenderPair {
+            line_1: "正在等待 Spotify...".into(),
+            line_2: "".into(),
+            progress_1: 1.0,
+            progress_2: 0.0,
+        };
     };
 
     let track_key = track_cache_key(track);
@@ -575,7 +595,12 @@ fn current_lines_for_track(
     }
 
     let artist = track.artists.first().cloned().unwrap_or_default();
-    ("未找到歌词".into(), format!("{} - {}", track.title, artist))
+    LyricRenderPair {
+        line_1: "未找到歌词".into(),
+        line_2: format!("{} - {}", track.title, artist),
+        progress_1: 1.0,
+        progress_2: 0.0,
+    }
 }
 
 fn load_or_fetch_lyrics(
@@ -675,12 +700,18 @@ fn parse_lrc(content: &str) -> Vec<LyricLine> {
         for time_ms in times {
             parsed.push(LyricLine {
                 time_ms,
+                end_time_ms: time_ms,
                 text: text.to_string(),
             });
         }
     }
 
     parsed.sort_by_key(|line| line.time_ms);
+    for idx in 0..parsed.len() {
+        let default_end = parsed[idx].time_ms.saturating_add(4_000);
+        let next_start = parsed.get(idx + 1).map(|line| line.time_ms).unwrap_or(default_end);
+        parsed[idx].end_time_ms = next_start.max(parsed[idx].time_ms.saturating_add(500));
+    }
     parsed
 }
 
@@ -705,22 +736,68 @@ fn parse_timestamp(tag: &str) -> Option<u64> {
     Some(minutes * 60_000 + seconds * 1_000 + millis)
 }
 
-fn lyric_pair_for_position(lines: &[LyricLine], position_ms: u64) -> (String, String) {
+fn lyric_pair_for_position(lines: &[LyricLine], position_ms: u64) -> LyricRenderPair {
     if lines.is_empty() {
-        return ("未找到歌词".into(), "".into());
+        return LyricRenderPair {
+            line_1: "未找到歌词".into(),
+            line_2: "".into(),
+            progress_1: 1.0,
+            progress_2: 0.0,
+        };
     }
 
-    let current_index = lines
-        .iter()
-        .rposition(|line| line.time_ms <= position_ms)
-        .unwrap_or(0);
+    let current_index = find_current_line_index(lines, position_ms);
     let current = lines.get(current_index).map(|line| line.text.clone()).unwrap_or_default();
     let next = lines
         .get(current_index + 1)
         .map(|line| line.text.clone())
         .unwrap_or_default();
 
-    (current, next)
+    let progress_1 = lines
+        .get(current_index)
+        .map(|line| line_progress(line, position_ms))
+        .unwrap_or(0.0);
+
+    LyricRenderPair {
+        line_1: current,
+        line_2: next,
+        progress_1,
+        progress_2: 0.0,
+    }
+}
+
+fn find_current_line_index(lines: &[LyricLine], position_ms: u64) -> usize {
+    if lines.is_empty() {
+        return 0;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = lines.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if lines[mid].time_ms <= position_ms {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    lo.saturating_sub(1)
+}
+
+fn line_progress(line: &LyricLine, position_ms: u64) -> f32 {
+    if position_ms <= line.time_ms {
+        return 0.0;
+    }
+    if position_ms >= line.end_time_ms {
+        return 1.0;
+    }
+
+    let duration = line.end_time_ms.saturating_sub(line.time_ms);
+    if duration == 0 {
+        return 1.0;
+    }
+    ((position_ms - line.time_ms) as f32 / duration as f32).clamp(0.0, 1.0)
 }
 
 fn is_credit_line(text: &str) -> bool {

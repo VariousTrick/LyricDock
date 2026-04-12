@@ -1,3 +1,6 @@
 target/
 node_modules/
 Cargo.lock
+open-orpheus/
+lyrics-cache/
+调试面板.json

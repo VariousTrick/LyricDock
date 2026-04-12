@@ -10,13 +10,18 @@ export component LyricsOverlay inherits Window {
     in property <int> panel_height: 88;
     in property <string> line_1: "";
     in property <string> line_2: "";
+    in property <float> progress_1: 0.0;
+    in property <float> progress_2: 0.0;
 
     private property <length> content_left: locked ? 0px : 22px;
     private property <length> content_top: locked ? 0px : 14px;
     private property <length> content_right: locked ? 0px : 86px;
+    private property <length> lyric_line_width: panel_width * 1px - content_left - content_right;
     private property <string> lyric_font: "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif";
     private property <brush> primary_fill: @linear-gradient(180deg, #f7fffb 0%, #56ffc1 56%, #00d17b 100%);
+    private property <brush> primary_unplayed_fill: @linear-gradient(180deg, #f8fbff 0%, #bfcad6 100%);
     private property <brush> secondary_fill: @linear-gradient(180deg, #ffffff 0%, #d5dde6 100%);
+    private property <brush> secondary_unplayed_fill: @linear-gradient(180deg, #eef3f8 0%, #a8b2bf 100%);
     private property <brush> frame_fill: @linear-gradient(180deg, #131722cc 0%, #0a0d16aa 100%);
     private property <brush> frame_border: @linear-gradient(180deg, #ffffff24 0%, #78e3b822 100%);
 
@@ -40,7 +45,7 @@ export component LyricsOverlay inherits Window {
         Text {
             x: content_left + 1px;
             y: content_top + 2px;
-            width: parent.width - content_left - content_right;
+            width: lyric_line_width;
             text: line_1;
             color: #000000b4;
             font-family: lyric_font;
@@ -55,9 +60,9 @@ export component LyricsOverlay inherits Window {
         Text {
             x: content_left;
             y: content_top;
-            width: parent.width - content_left - content_right;
+            width: lyric_line_width;
             text: line_1;
-            color: primary_fill;
+            color: primary_unplayed_fill;
             font-family: lyric_font;
             font-size: locked ? 30px : 26px;
             font-weight: 800;
@@ -70,10 +75,37 @@ export component LyricsOverlay inherits Window {
             stroke-style: outside;
         }
 
+        Rectangle {
+            x: content_left;
+            y: content_top;
+            width: lyric_line_width * Math.max(0.0, Math.min(progress_1, 1.0));
+            height: locked ? 36px : 32px;
+            clip: true;
+            background: #00000000;
+
+            Text {
+                x: 0px;
+                y: 0px;
+                width: lyric_line_width;
+                text: line_1;
+                color: primary_fill;
+                font-family: lyric_font;
+                font-size: locked ? 30px : 26px;
+                font-weight: 800;
+                wrap: no-wrap;
+                overflow: elide;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                stroke: #04110de0;
+                stroke-width: locked ? 1.8px : 1.6px;
+                stroke-style: outside;
+            }
+        }
+
         Text {
             x: content_left + 1px;
             y: locked ? 39px : 43px;
-            width: parent.width - content_left - content_right;
+            width: lyric_line_width;
             text: line_2;
             color: #00000092;
             font-family: lyric_font;
@@ -88,9 +120,9 @@ export component LyricsOverlay inherits Window {
         Text {
             x: content_left;
             y: locked ? 37px : 41px;
-            width: parent.width - content_left - content_right;
+            width: lyric_line_width;
             text: line_2;
-            color: secondary_fill;
+            color: secondary_unplayed_fill;
             font-family: lyric_font;
             font-size: locked ? 20px : 18px;
             font-weight: 600;
@@ -101,6 +133,33 @@ export component LyricsOverlay inherits Window {
             stroke: #0a1119c8;
             stroke-width: 1.2px;
             stroke-style: outside;
+        }
+
+        Rectangle {
+            x: content_left;
+            y: locked ? 37px : 41px;
+            width: lyric_line_width * Math.max(0.0, Math.min(progress_2, 1.0));
+            height: locked ? 26px : 24px;
+            clip: true;
+            background: #00000000;
+
+            Text {
+                x: 0px;
+                y: 0px;
+                width: lyric_line_width;
+                text: line_2;
+                color: secondary_fill;
+                font-family: lyric_font;
+                font-size: locked ? 20px : 18px;
+                font-weight: 600;
+                wrap: no-wrap;
+                overflow: elide;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                stroke: #0a1119c8;
+                stroke-width: 1.2px;
+                stroke-style: outside;
+            }
         }
 
         if !locked : Rectangle {
