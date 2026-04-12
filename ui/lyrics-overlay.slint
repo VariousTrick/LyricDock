@@ -1,7 +1,7 @@
 export component LyricsOverlay inherits Window {
     callback request-lock();
     callback request-font-step(step: int);
-    callback request-next-palette();
+    callback request-set-palette(index: int);
     callback begin-move();
     callback request-move(dx: length, dy: length);
     callback end-move();
@@ -14,6 +14,7 @@ export component LyricsOverlay inherits Window {
     in property <int> panel_height: 112;
     in property <int> font_scale: 0;
     in property <int> palette_idx: 0;
+    private property <bool> palette_open: false;
     in property <string> line_1: "";
     in property <string> line_2: "";
     in property <float> progress_1: 0.0;
@@ -61,32 +62,6 @@ export component LyricsOverlay inherits Window {
         border-color: #ffffff1f;
         border-radius: 0px;
 
-        if locked : Rectangle {
-            x: parent.width - 70px;
-            y: 4px;
-            width: 58px;
-            height: 22px;
-            background: #00000040;
-            border-width: 1px;
-            border-color: #ffffff20;
-
-            Text {
-                text: "解锁";
-                color: #f8fbff;
-                font-family: lyric_font;
-                font-size: 12px;
-                font-weight: 600;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-
-            TouchArea {
-                clicked => {
-                    root.request-lock();
-                }
-            }
-        }
-
         if !locked : Rectangle {
             x: 8px;
             y: 4px;
@@ -101,7 +76,8 @@ export component LyricsOverlay inherits Window {
                 y: 3px;
                 width: 44px;
                 height: parent.height - 6px;
-                background: #00000038;
+                background: lock_touch.pressed ? #00000068 : lock_touch.has-hover ? #ffffff2a : #00000038;
+                animate background { duration: 120ms; easing: ease-out; }
 
                 Text {
                     text: "锁定";
@@ -113,7 +89,8 @@ export component LyricsOverlay inherits Window {
                     vertical-alignment: center;
                 }
 
-                TouchArea {
+                lock_touch := TouchArea {
+                    mouse-cursor: pointer;
                     clicked => {
                         root.request-lock();
                     }
@@ -125,7 +102,8 @@ export component LyricsOverlay inherits Window {
                 y: 3px;
                 width: 28px;
                 height: parent.height - 6px;
-                background: #00000038;
+                background: font_minus_touch.pressed ? #00000068 : font_minus_touch.has-hover ? #ffffff2a : #00000038;
+                animate background { duration: 120ms; easing: ease-out; }
 
                 Text {
                     text: "A-";
@@ -137,7 +115,8 @@ export component LyricsOverlay inherits Window {
                     vertical-alignment: center;
                 }
 
-                TouchArea {
+                font_minus_touch := TouchArea {
+                    mouse-cursor: pointer;
                     clicked => {
                         root.request-font-step(-1);
                     }
@@ -149,7 +128,8 @@ export component LyricsOverlay inherits Window {
                 y: 3px;
                 width: 28px;
                 height: parent.height - 6px;
-                background: #00000038;
+                background: font_plus_touch.pressed ? #00000068 : font_plus_touch.has-hover ? #ffffff2a : #00000038;
+                animate background { duration: 120ms; easing: ease-out; }
 
                 Text {
                     text: "A+";
@@ -161,7 +141,8 @@ export component LyricsOverlay inherits Window {
                     vertical-alignment: center;
                 }
 
-                TouchArea {
+                font_plus_touch := TouchArea {
+                    mouse-cursor: pointer;
                     clicked => {
                         root.request-font-step(1);
                     }
@@ -173,7 +154,8 @@ export component LyricsOverlay inherits Window {
                 y: 3px;
                 width: 38px;
                 height: parent.height - 6px;
-                background: #00000038;
+                background: palette_touch.pressed ? #00000068 : palette_touch.has-hover ? #ffffff2a : #00000038;
+                animate background { duration: 120ms; easing: ease-out; }
 
                 Text {
                     text: "配色";
@@ -185,9 +167,96 @@ export component LyricsOverlay inherits Window {
                     vertical-alignment: center;
                 }
 
-                TouchArea {
+                palette_touch := TouchArea {
+                    mouse-cursor: pointer;
                     clicked => {
-                        root.request-next-palette();
+                        root.palette_open = !root.palette_open;
+                    }
+                }
+            }
+        }
+
+        if !locked && palette_open : Rectangle {
+            x: parent.width - 166px;
+            y: toolbar_h + 4px;
+            width: 154px;
+            height: 40px;
+            background: #000000c0;
+            border-width: 1px;
+            border-color: #ffffff1f;
+
+            Rectangle {
+                x: 8px;
+                y: 8px;
+                width: 28px;
+                height: 24px;
+                background: #56ffc1;
+                border-width: palette_0_touch.pressed || palette_0_touch.has-hover || palette_idx == 0 ? 2px : 1px;
+                border-color: #f8fbff;
+                animate background { duration: 120ms; easing: ease-out; }
+
+                palette_0_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.request-set-palette(0);
+                        root.palette_open = false;
+                    }
+                }
+            }
+
+            Rectangle {
+                x: 42px;
+                y: 8px;
+                width: 28px;
+                height: 24px;
+                background: #ff9800;
+                border-width: palette_1_touch.pressed || palette_1_touch.has-hover || palette_idx == 1 ? 2px : 1px;
+                border-color: #f8fbff;
+                animate background { duration: 120ms; easing: ease-out; }
+
+                palette_1_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.request-set-palette(1);
+                        root.palette_open = false;
+                    }
+                }
+            }
+
+            Rectangle {
+                x: 76px;
+                y: 8px;
+                width: 28px;
+                height: 24px;
+                background: #2e8fff;
+                border-width: palette_2_touch.pressed || palette_2_touch.has-hover || palette_idx == 2 ? 2px : 1px;
+                border-color: #f8fbff;
+                animate background { duration: 120ms; easing: ease-out; }
+
+                palette_2_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.request-set-palette(2);
+                        root.palette_open = false;
+                    }
+                }
+            }
+
+            Rectangle {
+                x: 110px;
+                y: 8px;
+                width: 28px;
+                height: 24px;
+                background: #ff4f84;
+                border-width: palette_3_touch.pressed || palette_3_touch.has-hover || palette_idx == 3 ? 2px : 1px;
+                border-color: #f8fbff;
+                animate background { duration: 120ms; easing: ease-out; }
+
+                palette_3_touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.request-set-palette(3);
+                        root.palette_open = false;
                     }
                 }
             }

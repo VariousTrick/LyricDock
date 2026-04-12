@@ -107,6 +107,13 @@ struct DragState {
     resize_origin: Option<(u32, u32)>,
 }
 
+#[derive(Debug, Default, Clone)]
+struct InteractionState {
+    dragging: bool,
+    resizing: bool,
+    dirty: bool,
+}
+
 #[derive(Debug, Default)]
 struct RuntimeState {
     active_lyrics: Option<ActiveLyrics>,
@@ -172,6 +179,7 @@ impl MprisClient {
 struct SomelyricTray {
     locked: bool,
     preview_path: String,
+    preview_state: Arc<Mutex<PreviewData>>,
 }
 
 impl ksni::Tray for SomelyricTray {
@@ -213,20 +221,10 @@ impl ksni::Tray for SomelyricTray {
                 checked: self.locked,
                 activate: Box::new(|tray: &mut Self| {
                     tray.locked = !tray.locked;
-                    update_preview_file(Path::new(&tray.preview_path), |preview| {
+                    if let Ok(mut preview) = tray.preview_state.lock() {
                         preview.locked = Some(tray.locked);
-                    });
-                }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: "解锁并显示编辑框".into(),
-                activate: Box::new(|tray: &mut Self| {
-                    tray.locked = false;
-                    update_preview_file(Path::new(&tray.preview_path), |preview| {
-                        preview.locked = Some(false);
-                    });
+                        write_preview_data(Path::new(&tray.preview_path), &preview);
+                    }
                 }),
                 ..Default::default()
             }
@@ -327,12 +325,15 @@ fn main() -> Result<()> {
     let preview_path = Path::new(PREVIEW_FILE).to_path_buf();
     let initial_preview = read_preview_data(&preview_path);
     let shared_preview = Rc::new(RefCell::new(initial_preview.clone()));
+    let tray_preview_state = Arc::new(Mutex::new(initial_preview.clone()));
     let drag_state = Rc::new(RefCell::new(DragState::default()));
+    let interaction_state = Rc::new(RefCell::new(InteractionState::default()));
     let runtime_state = Rc::new(RefCell::new(RuntimeState::default()));
     let mpris_client = Rc::new(MprisClient::new());
     let tray_handle = SomelyricTray {
         locked: initial_preview.locked.unwrap_or(false),
         preview_path: preview_path.to_string_lossy().into_owned(),
+        preview_state: Arc::clone(&tray_preview_state),
     }
     .spawn()
     .ok();
@@ -358,11 +359,15 @@ fn main() -> Result<()> {
     {
         let preview_path_for_lock = preview_path.clone();
         let preview_state = Rc::clone(&shared_preview);
+        let tray_preview_state = Arc::clone(&tray_preview_state);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback("request-lock", move |_| {
                 let mut preview = preview_state.borrow_mut();
                 let next_locked = !preview.locked.unwrap_or(false);
                 preview.locked = Some(next_locked);
+                if let Ok(mut tray_preview) = tray_preview_state.lock() {
+                    *tray_preview = preview.clone();
+                }
                 write_preview_data(&preview_path_for_lock, &preview);
                 true
             });
@@ -371,12 +376,16 @@ fn main() -> Result<()> {
     {
         let preview_path_for_font = preview_path.clone();
         let preview_state = Rc::clone(&shared_preview);
+        let tray_preview_state = Arc::clone(&tray_preview_state);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback_with_args("request-font-step", move |args, _| {
                 let step = value_to_i32(args.first());
                 let mut preview = preview_state.borrow_mut();
                 let current = preview.font_scale.unwrap_or(0);
                 preview.font_scale = Some((current + step).clamp(-8, 18));
+                if let Ok(mut tray_preview) = tray_preview_state.lock() {
+                    *tray_preview = preview.clone();
+                }
                 write_preview_data(&preview_path_for_font, &preview);
                 true
             });
@@ -385,11 +394,15 @@ fn main() -> Result<()> {
     {
         let preview_path_for_palette = preview_path.clone();
         let preview_state = Rc::clone(&shared_preview);
+        let tray_preview_state = Arc::clone(&tray_preview_state);
         shell.select(Surface::named(SURFACE_NAME))
-            .on_callback("request-next-palette", move |_| {
+            .on_callback_with_args("request-set-palette", move |args, _| {
+                let palette_idx = value_to_i32(args.first()).clamp(0, 3);
                 let mut preview = preview_state.borrow_mut();
-                let next = (preview.palette_idx.unwrap_or(0) + 1).rem_euclid(4);
-                preview.palette_idx = Some(next);
+                preview.palette_idx = Some(palette_idx);
+                if let Ok(mut tray_preview) = tray_preview_state.lock() {
+                    *tray_preview = preview.clone();
+                }
                 write_preview_data(&preview_path_for_palette, &preview);
                 true
             });
@@ -400,9 +413,13 @@ fn main() -> Result<()> {
         let preview_state = Rc::clone(&shared_preview);
         let preview_state_2 = Rc::clone(&shared_preview);
         let preview_state_3 = Rc::clone(&shared_preview);
+        let tray_preview_state = Arc::clone(&tray_preview_state);
         let drag_state = Rc::clone(&drag_state);
         let drag_state_2 = Rc::clone(&drag_state);
         let drag_state_3 = Rc::clone(&drag_state);
+        let interaction_state_begin = Rc::clone(&interaction_state);
+        let interaction_state_move = Rc::clone(&interaction_state);
+        let interaction_state_end = Rc::clone(&interaction_state);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback("begin-move", move |_| {
                 let preview = preview_state.borrow().clone();
@@ -410,6 +427,9 @@ fn main() -> Result<()> {
                     preview.panel_x.unwrap_or(36),
                     preview.panel_y.unwrap_or(24),
                 ));
+                let mut interaction = interaction_state_begin.borrow_mut();
+                interaction.dragging = true;
+                interaction.dirty = true;
                 true
             })
             .on_callback_with_args("request-move", move |args, _| {
@@ -419,7 +439,11 @@ fn main() -> Result<()> {
                     let mut preview = preview_state_2.borrow_mut();
                     preview.panel_x = Some((origin_x + dx).max(0));
                     preview.panel_y = Some((origin_y + dy).max(0));
+                    if let Ok(mut tray_preview) = tray_preview_state.lock() {
+                        *tray_preview = preview.clone();
+                    }
                 }
+                interaction_state_move.borrow_mut().dirty = true;
                 true
             })
             .on_callback("end-move", move |_| {
@@ -427,6 +451,9 @@ fn main() -> Result<()> {
                 drag.move_origin = None;
                 let preview = preview_state_3.borrow().clone();
                 write_preview_data(&preview_path_for_move_2, &preview);
+                let mut interaction = interaction_state_end.borrow_mut();
+                interaction.dragging = false;
+                interaction.dirty = true;
                 true
             });
     }
@@ -436,9 +463,13 @@ fn main() -> Result<()> {
         let preview_state = Rc::clone(&shared_preview);
         let preview_state_2 = Rc::clone(&shared_preview);
         let preview_state_3 = Rc::clone(&shared_preview);
+        let tray_preview_state = Arc::clone(&tray_preview_state);
         let drag_state = Rc::clone(&drag_state);
         let drag_state_2 = Rc::clone(&drag_state);
         let drag_state_3 = Rc::clone(&drag_state);
+        let interaction_state_begin = Rc::clone(&interaction_state);
+        let interaction_state_resize = Rc::clone(&interaction_state);
+        let interaction_state_end = Rc::clone(&interaction_state);
         shell.select(Surface::named(SURFACE_NAME))
             .on_callback("begin-resize", move |_| {
                 let preview = preview_state.borrow().clone();
@@ -446,6 +477,9 @@ fn main() -> Result<()> {
                     preview.panel_width.unwrap_or(640),
                     preview.panel_height.unwrap_or(112),
                 ));
+                let mut interaction = interaction_state_begin.borrow_mut();
+                interaction.resizing = true;
+                interaction.dirty = true;
                 true
             })
             .on_callback_with_args("request-resize", move |args, _| {
@@ -455,7 +489,11 @@ fn main() -> Result<()> {
                     let mut preview = preview_state_2.borrow_mut();
                     preview.panel_width = Some(((origin_w as i32 + dw).max(320)) as u32);
                     preview.panel_height = Some(((origin_h as i32 + dh).max(96)) as u32);
+                    if let Ok(mut tray_preview) = tray_preview_state.lock() {
+                        *tray_preview = preview.clone();
+                    }
                 }
+                interaction_state_resize.borrow_mut().dirty = true;
                 true
             })
             .on_callback("end-resize", move |_| {
@@ -463,6 +501,9 @@ fn main() -> Result<()> {
                 drag.resize_origin = None;
                 let preview = preview_state_3.borrow().clone();
                 write_preview_data(&preview_path_for_resize_2, &preview);
+                let mut interaction = interaction_state_end.borrow_mut();
+                interaction.resizing = false;
+                interaction.dirty = true;
                 true
             });
     }
@@ -470,60 +511,101 @@ fn main() -> Result<()> {
     let event_loop = shell.event_loop_handle();
     let tray_state = Arc::new(Mutex::new(tray_handle));
     let tray_state_for_timer = Arc::clone(&tray_state);
+    let tray_preview_state_for_timer = Arc::clone(&tray_preview_state);
     let preview_state_for_timer = Rc::clone(&shared_preview);
+    let interaction_state_for_timer = Rc::clone(&interaction_state);
     let runtime_state_for_timer = Rc::clone(&runtime_state);
     let mpris_for_timer = Rc::clone(&mpris_client);
 
     event_loop.add_timer(Duration::from_millis(200), move |_, app_state| {
+        if let Ok(tray_preview) = tray_preview_state_for_timer.lock() {
+            if *tray_preview != *preview_state_for_timer.borrow() {
+                *preview_state_for_timer.borrow_mut() = tray_preview.clone();
+            }
+        }
+
         let preview = preview_state_for_timer.borrow().clone();
+        let interaction = interaction_state_for_timer.borrow().clone();
 
         let mut runtime = runtime_state_for_timer.borrow_mut();
-        let playback = mpris_for_timer
-            .as_ref()
-            .as_ref()
-            .and_then(|client| client.read_track());
-        let lyric_pair = current_lines_for_track(
-            playback.as_ref(),
-            &mut runtime,
-            Path::new(LYRICS_DIR),
-            Path::new("scripts/fetch-current-song-lyrics.js"),
-        );
         let font_scale = preview.font_scale.unwrap_or(0) as f32;
         let primary_font = (if preview.locked.unwrap_or(false) { 32.0 } else { 26.0 } + font_scale)
             .max(18.0);
         let secondary_font = (if preview.locked.unwrap_or(false) { 22.0 } else { 18.0 } + font_scale)
             .max(14.0);
         let available_width = (preview.panel_width.unwrap_or(640) as f32 - 24.0).max(120.0);
-        let (offset_1, scroll_1) = line_motion(
-            &lyric_pair.line_1,
-            primary_font,
-            available_width,
-            lyric_pair.progress_1,
-        );
-        let (offset_2, scroll_2) = line_motion(
-            &lyric_pair.line_2,
-            secondary_font,
-            available_width,
-            lyric_pair.progress_2,
-        );
+        let render = if interaction.dragging || interaction.resizing || interaction.dirty {
+            let mut render = runtime.last_render.clone().unwrap_or(RenderState {
+                locked: preview.locked.unwrap_or(false),
+                width: preview.panel_width.unwrap_or(640),
+                height: preview.panel_height.unwrap_or(112),
+                x: preview.panel_x.unwrap_or(36).max(0),
+                y: preview.panel_y.unwrap_or(24).max(0),
+                line_1: String::new(),
+                line_2: String::new(),
+                progress_1: 1.0,
+                progress_2: 0.0,
+                scroll_1: 0.0,
+                scroll_2: 0.0,
+                offset_1: 0.0,
+                offset_2: 0.0,
+                font_scale: preview.font_scale.unwrap_or(0),
+                palette_idx: preview.palette_idx.unwrap_or(0),
+            });
+            render.locked = preview.locked.unwrap_or(false);
+            render.width = preview.panel_width.unwrap_or(640);
+            render.height = preview.panel_height.unwrap_or(112);
+            render.x = preview.panel_x.unwrap_or(36).max(0);
+            render.y = preview.panel_y.unwrap_or(24).max(0);
+            render.font_scale = preview.font_scale.unwrap_or(0);
+            render.palette_idx = preview.palette_idx.unwrap_or(0);
+            render
+        } else {
+            let playback = mpris_for_timer
+                .as_ref()
+                .as_ref()
+                .and_then(|client| client.read_track());
+            let lyric_pair = current_lines_for_track(
+                playback.as_ref(),
+                &mut runtime,
+                Path::new(LYRICS_DIR),
+                Path::new("scripts/fetch-current-song-lyrics.js"),
+            );
+            let (offset_1, scroll_1) = line_motion(
+                &lyric_pair.line_1,
+                primary_font,
+                available_width,
+                lyric_pair.progress_1,
+            );
+            let (offset_2, scroll_2) = line_motion(
+                &lyric_pair.line_2,
+                secondary_font,
+                available_width,
+                lyric_pair.progress_2,
+            );
 
-        let render = RenderState {
-            locked: preview.locked.unwrap_or(false),
-            width: preview.panel_width.unwrap_or(640),
-            height: preview.panel_height.unwrap_or(112),
-            x: preview.panel_x.unwrap_or(36).max(0),
-            y: preview.panel_y.unwrap_or(24).max(0),
-            line_1: lyric_pair.line_1,
-            line_2: lyric_pair.line_2,
-            progress_1: lyric_pair.progress_1,
-            progress_2: lyric_pair.progress_2,
-            scroll_1,
-            scroll_2,
-            offset_1,
-            offset_2,
-            font_scale: preview.font_scale.unwrap_or(0),
-            palette_idx: preview.palette_idx.unwrap_or(0),
+            RenderState {
+                locked: preview.locked.unwrap_or(false),
+                width: preview.panel_width.unwrap_or(640),
+                height: preview.panel_height.unwrap_or(112),
+                x: preview.panel_x.unwrap_or(36).max(0),
+                y: preview.panel_y.unwrap_or(24).max(0),
+                line_1: lyric_pair.line_1,
+                line_2: lyric_pair.line_2,
+                progress_1: lyric_pair.progress_1,
+                progress_2: lyric_pair.progress_2,
+                scroll_1,
+                scroll_2,
+                offset_1,
+                offset_2,
+                font_scale: preview.font_scale.unwrap_or(0),
+                palette_idx: preview.palette_idx.unwrap_or(0),
+            }
         };
+
+        if interaction.dirty {
+            interaction_state_for_timer.borrow_mut().dirty = false;
+        }
 
         let needs_passthrough_update = runtime.last_locked != Some(render.locked);
 
@@ -583,7 +665,11 @@ fn main() -> Result<()> {
         }
 
         runtime.last_locked = Some(render.locked);
-        TimeoutAction::ToDuration(Duration::from_millis(200))
+        if interaction.dragging || interaction.resizing || interaction.dirty {
+            TimeoutAction::ToDuration(Duration::from_millis(16))
+        } else {
+            TimeoutAction::ToDuration(Duration::from_millis(200))
+        }
     })?;
 
     shell.select(Surface::named(SURFACE_NAME)).configure(|_, surface| {
@@ -611,14 +697,6 @@ fn read_preview_data(path: &Path) -> PreviewData {
         .ok()
         .and_then(|content| serde_json::from_str::<PreviewData>(&content).ok())
         .unwrap_or_default()
-}
-
-fn update_preview_file(path: &Path, updater: impl FnOnce(&mut PreviewData)) {
-    let mut preview = read_preview_data(path);
-    updater(&mut preview);
-    if let Ok(content) = serde_json::to_string_pretty(&preview) {
-        let _ = fs::write(path, content);
-    }
 }
 
 fn apply_preview_properties(
