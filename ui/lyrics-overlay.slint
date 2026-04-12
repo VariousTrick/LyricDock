@@ -11,51 +11,114 @@ export component LyricsOverlay inherits Window {
     in property <string> line_1: "";
     in property <string> line_2: "";
 
+    private property <length> content_left: locked ? 0px : 22px;
+    private property <length> content_top: locked ? 0px : 14px;
+    private property <length> content_right: locked ? 0px : 86px;
+    private property <string> lyric_font: "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif";
+    private property <brush> primary_fill: @linear-gradient(180deg, #f7fffb 0%, #56ffc1 56%, #00d17b 100%);
+    private property <brush> secondary_fill: @linear-gradient(180deg, #ffffff 0%, #d5dde6 100%);
+    private property <brush> frame_fill: @linear-gradient(180deg, #131722cc 0%, #0a0d16aa 100%);
+    private property <brush> frame_border: @linear-gradient(180deg, #ffffff24 0%, #78e3b822 100%);
+
     background: transparent;
 
     Rectangle {
         width: panel_width * 1px;
         height: panel_height * 1px;
-        background: locked ? #00000000 : #0f1117aa;
+        background: locked ? #00000000 : frame_fill;
         border-width: locked ? 0px : 1px;
-        border-color: #ffffff20;
-        border-radius: locked ? 0px : 20px;
+        border-color: frame_border;
+        border-radius: locked ? 0px : 18px;
+
+        if !locked : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: @linear-gradient(180deg, #ffffff07 0%, #00000000 35%, #00000010 100%);
+            border-radius: parent.border-radius;
+        }
 
         Text {
-            x: locked ? 0px : 18px;
-            y: locked ? 0px : 14px;
-            width: parent.width - (locked ? 0px : 90px);
+            x: content_left + 1px;
+            y: content_top + 2px;
+            width: parent.width - content_left - content_right;
             text: line_1;
-            color: #ffffff;
-            font-size: locked ? 26px : 22px;
-            font-weight: 700;
-            wrap: word-wrap;
+            color: #000000b4;
+            font-family: lyric_font;
+            font-size: locked ? 30px : 26px;
+            font-weight: 800;
+            wrap: no-wrap;
+            overflow: elide;
+            horizontal-alignment: left;
             vertical-alignment: center;
         }
 
         Text {
-            x: locked ? 0px : 18px;
-            y: locked ? 34px : 48px;
-            width: parent.width - (locked ? 0px : 90px);
-            text: line_2;
-            color: #d3dae5;
-            font-size: locked ? 18px : 16px;
-            wrap: word-wrap;
+            x: content_left;
+            y: content_top;
+            width: parent.width - content_left - content_right;
+            text: line_1;
+            color: primary_fill;
+            font-family: lyric_font;
+            font-size: locked ? 30px : 26px;
+            font-weight: 800;
+            wrap: no-wrap;
+            overflow: elide;
+            horizontal-alignment: left;
             vertical-alignment: center;
+            stroke: #04110de0;
+            stroke-width: locked ? 1.8px : 1.6px;
+            stroke-style: outside;
+        }
+
+        Text {
+            x: content_left + 1px;
+            y: locked ? 39px : 43px;
+            width: parent.width - content_left - content_right;
+            text: line_2;
+            color: #00000092;
+            font-family: lyric_font;
+            font-size: locked ? 20px : 18px;
+            font-weight: 600;
+            wrap: no-wrap;
+            overflow: elide;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: content_left;
+            y: locked ? 37px : 41px;
+            width: parent.width - content_left - content_right;
+            text: line_2;
+            color: secondary_fill;
+            font-family: lyric_font;
+            font-size: locked ? 20px : 18px;
+            font-weight: 600;
+            wrap: no-wrap;
+            overflow: elide;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            stroke: #0a1119c8;
+            stroke-width: 1.2px;
+            stroke-style: outside;
         }
 
         if !locked : Rectangle {
-            x: parent.width - 74px;
+            x: parent.width - 72px;
             y: 12px;
-            width: 56px;
-            height: 30px;
-            background: #ffffff16;
+            width: 54px;
+            height: 28px;
+            background: @linear-gradient(180deg, #ffffff20 0%, #0a0f18a8 100%);
+            border-width: 1px;
+            border-color: #ffffff24;
             border-radius: 10px;
 
             Text {
                 text: "锁定";
-                color: #f8fafc;
-                font-size: 13px;
+                color: #f8fbff;
+                font-family: lyric_font;
+                font-size: 12px;
+                font-weight: 600;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -68,12 +131,12 @@ export component LyricsOverlay inherits Window {
         }
 
         if !locked : Rectangle {
-            x: parent.width - 16px;
-            y: parent.height - 16px;
-            width: 10px;
-            height: 10px;
-            background: #7dc2ffcc;
-            border-radius: 3px;
+            x: parent.width - 18px;
+            y: parent.height - 18px;
+            width: 12px;
+            height: 12px;
+            background: @linear-gradient(180deg, #92ffd0 0%, #1bda83 100%);
+            border-radius: 4px;
         }
 
         if !locked : TouchArea {
