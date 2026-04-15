@@ -1,16 +1,79 @@
 # LyricDock 配置文件
 #
+# 这份文件是“长期配置”：
+# - 歌词目录
+# - 缓存上限
+# - 双行开关
+# - 颜色、字体、透明度
+#
+# 程序运行中的窗口位置、大小、锁定状态，
+# 仍然会保存在 `调试面板.json` 里。
+
 # `lyrics_dir`:
 #   歌词根目录。程序会在这个目录下自动创建：
 #   - 导入歌词/
 #   - 缓存歌词/
 #   你手动导入的歌词请放进 `导入歌词/`。
 #   程序自动抓取的歌词会放进 `缓存歌词/`。
-#
+lyrics_dir = "/home/Arch/Downloads/vscode/LyricDock/lyrics-cache"
+
 # `cache_limit_mb`:
 #   自动缓存歌词的大小上限，单位是 MB。
 #   超出后只会清理 `缓存歌词/` 里的旧歌词，
 #   不会删除你手动放进 `导入歌词/` 的文件。
-
-lyrics_dir = "/home/Arch/Downloads/vscode/LyricDock/lyrics-cache"
 cache_limit_mb = 256
+
+# `show_secondary_line`:
+#   是否显示第二行歌词。
+#   开启后会显示“当前句 + 下一句”的双行模式。
+#   关闭后只显示当前主歌词。
+show_secondary_line = true
+
+# `use_gradient`:
+#   是否使用渐变填充当前高亮歌词。
+#   关闭后使用纯色，默认关闭。
+use_gradient = false
+
+# `font_family`:
+#   歌词字体族。可以写多个字体，按顺序回退。
+font_family = "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif"
+
+# `highlight_color`:
+#   当前正在推进的歌词颜色。
+#   建议使用饱和度较高的纯色，例如绿色、青色、红色。
+highlight_color = "#00FF00"
+
+# `base_color`:
+#   当前歌词未推进部分的基础颜色。
+base_color = "#f5f7fb"
+
+# `preview_color`:
+#   另一行“预告句”的颜色。
+#   如果你不想让预告句发灰，可以让它和 `base_color` 一样。
+preview_color = "#f5f7fb"
+
+# `stroke_color`:
+#   歌词描边颜色，建议保留深色。
+stroke_color = "#081019e0"
+
+# `shadow_color`:
+#   歌词投影颜色。
+shadow_color = "#000000c4"
+
+# `panel_background_color`:
+#   解锁态面板背景色。
+#   支持 `#RRGGBB` 和 `#AARRGGBB`。
+panel_background_color = "#00000095"
+
+# `panel_border_color`:
+#   解锁态面板边框颜色。
+panel_border_color = "#ffffffa1"
+
+# `resize_handle_color`:
+#   解锁态右下角缩放点颜色。
+resize_handle_color = "#ffffffa8"
+
+# `preview_opacity`:
+#   预告句透明度，范围 0.0 到 1.0。
+#   如果你希望两行几乎一样亮，可以设成 1.0。
+preview_opacity = 1.0

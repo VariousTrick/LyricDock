@@ -110,6 +110,11 @@ function scoreCandidate(track, song) {
   else if (durationDelta <= 3000) score += 25;
   else if (durationDelta <= 8000) score += 10;
 
+  const name = normalize(song.name || '');
+  if (/\b(instrumental|伴奏|纯音乐|钢琴版|吉他版|cover|翻自|翻唱)\b/iu.test(name)) {
+    score -= 120;
+  }
+
   return score;
 }
 
@@ -168,8 +173,9 @@ async function main() {
     throw new Error('No confident lyric match found.');
   }
 
-  const lyric = await withRetry(() => netease.lyric({ id: best.song.id }));
+  const lyric = await withRetry(() => netease.lyric_new({ id: best.song.id }));
   const lrc = lyric.body?.lrc?.lyric;
+  const yrc = lyric.body?.yrc?.lyric || '';
   if (!lrc) {
     throw new Error('Matched song has no lyric payload.');
   }
@@ -198,9 +204,15 @@ async function main() {
   const baseName = await pickAvailableBaseName(outDir, preferredBaseName, cacheKey);
 
   const lrcPath = path.join(outDir, `${baseName}.lrc`);
+  const yrcPath = path.join(outDir, `${baseName}.yrc`);
   const jsonPath = path.join(outDir, `${baseName}.json`);
 
   await fs.writeFile(lrcPath, lrc, 'utf8');
+  if (yrc.trim()) {
+    await fs.writeFile(yrcPath, yrc, 'utf8');
+  } else {
+    await fs.rm(yrcPath, { force: true });
+  }
   await fs.writeFile(
     jsonPath,
     JSON.stringify(
@@ -217,6 +229,10 @@ async function main() {
           durationMs: best.song.duration,
           score: best.score,
         },
+        lyrics: {
+          hasLrc: !!lrc,
+          hasYrc: !!yrc.trim(),
+        },
       },
       null,
       2
@@ -228,12 +244,14 @@ async function main() {
     JSON.stringify(
       {
         lrcPath,
+        yrcPath: yrc.trim() ? yrcPath : null,
         jsonPath,
         track,
         matchedId: best.song.id,
         matchedTitle: best.song.name,
         matchedArtists: (best.song.artists || []).map((item) => item.name),
         score: best.score,
+        hasYrc: !!yrc.trim(),
       },
       null,
       2

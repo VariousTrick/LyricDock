@@ -52,7 +52,6 @@ component ToolbarIconButton inherits Rectangle {
 export component LyricsOverlay inherits Window {
     callback request-lock();
     callback request-font-step(step: int);
-    callback request-set-palette(color: string);
     callback begin-move();
     callback request-move(dx: length, dy: length);
     callback end-move();
@@ -64,18 +63,29 @@ export component LyricsOverlay inherits Window {
     in property <int> panel_width: 640;
     in property <int> panel_height: 112;
     in property <int> font_scale: 0;
-    in property <string> palette_color: "#56ffc1";
-    private property <bool> palette_open: false;
+    in property <bool> show_secondary_line: true;
+    in property <bool> use_gradient: false;
+    in property <string> lyric_font: "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif";
+    in property <brush> highlight_color: #00e676;
+    in property <brush> base_color: #f5f7fb;
+    in property <brush> preview_color: #f5f7fb;
+    in property <brush> stroke_color: #081019e0;
+    in property <brush> shadow_color: #000000c4;
+    in property <brush> panel_background_brush: #00000095;
+    in property <brush> panel_border_brush: #ffffff28;
+    in property <brush> resize_handle_brush: #ffffffa8;
+    in property <float> preview_opacity: 1.0;
     in property <string> line_1: "";
     in property <string> line_2: "";
     in property <float> progress_1: 0.0;
     in property <float> progress_2: 0.0;
+    in property <bool> line_1_active: true;
+    in property <bool> line_2_active: false;
     in property <float> scroll_1: 0.0;
     in property <float> scroll_2: 0.0;
     in property <float> offset_1: 0.0;
     in property <float> offset_2: 0.0;
 
-    private property <string> lyric_font: "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif";
     private property <length> toolbar_h: 0px;
     private property <length> button_area_h: locked ? 0px : 50px;
     private property <length> content_left: 12px;
@@ -85,28 +95,40 @@ export component LyricsOverlay inherits Window {
     private property <length> available_height: panel_height * 1px - content_top - content_bottom;
     private property <length> lyric_line_width: panel_width * 1px - content_left - content_right;
     private property <length> primary_font_size: Math.max(18px, (locked ? 32px : 26px) + font_scale * 1px);
-    private property <length> secondary_font_size: Math.max(14px, (locked ? 22px : 18px) + font_scale * 1px);
+    private property <length> secondary_font_size: primary_font_size;
+    private property <bool> show_second: show_secondary_line && line_2 != "";
+    private property <length> line_gap: show_second ? 8px : 0px;
+    private property <length> active_primary_font_size: primary_font_size;
+    private property <length> lyric_block_height: active_primary_font_size + (show_second ? secondary_font_size + line_gap : 0px);
+    private property <length> lyric_top: (panel_height * 1px - button_area_h - lyric_block_height) / 2;
+    private property <length> primary_wave_offset: 0px;
 
-    private property <brush> primary_fill: @linear-gradient(180deg, #56ffc1 0%, #56ffc1 55%, #56ffc1 100%);
-    private property <brush> secondary_fill: @linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.6) 100%);
-    private property <brush> primary_unplayed_fill: @linear-gradient(180deg, #f8fbff 0%, #bfcad6 100%);
-    private property <brush> secondary_unplayed_fill: @linear-gradient(180deg, #eef3f8 0%, #a8b2bf 100%);
-    private property <brush> panel_background: @linear-gradient(180deg, #00000080 0%, #00000095 50%, #000000aa 100%);
-
+    private property <brush> primary_fill_gradient: @linear-gradient(180deg, #ffffff 0%, #dff8ff 48%, #8ee8ff 100%);
+    private property <brush> primary_unplayed_fill_gradient: @linear-gradient(180deg, #ffffff 0%, #f1f5fa 52%, #d8e0e9 100%);
+    private property <brush> primary_fill: use_gradient ? primary_fill_gradient : primary_fill_solid;
+    private property <brush> primary_unplayed_fill: use_gradient ? primary_unplayed_fill_gradient : primary_unplayed_fill_solid;
+    private property <brush> primary_fill_solid: highlight_color;
+    private property <brush> primary_unplayed_fill_solid: base_color;
+    private property <brush> line_1_fill: line_1_active ? primary_fill : preview_color;
+    private property <brush> line_2_fill: line_2_active ? primary_fill : preview_color;
+    private property <brush> line_1_unplayed_fill: line_1_active ? primary_unplayed_fill : preview_color;
+    private property <brush> line_2_unplayed_fill: line_2_active ? primary_unplayed_fill : preview_color;
+    private property <float> line_1_opacity: line_1_active ? 1.0 : preview_opacity;
+    private property <float> line_2_opacity: line_2_active ? 1.0 : preview_opacity;
     background: transparent;
 
     Rectangle {
         width: panel_width * 1px;
         height: panel_height * 1px;
-        background: locked ? #00000000 : panel_background;
+        background: locked ? #00000000 : panel_background_brush;
         border-width: locked ? 0px : 1px;
-        border-color: #ffffff28;
+        border-color: panel_border_brush;
         border-radius: 8px;
 
         if !locked : Rectangle {
-            x: (parent.width - 180px) / 2;
+            x: (parent.width - 132px) / 2;
             y: parent.height - button_area_h;
-            width: 180px;
+            width: 132px;
             height: button_area_h;
             background: #00000000;
 
@@ -142,135 +164,138 @@ export component LyricsOverlay inherits Window {
                     }
                 }
 
-                ToolbarIconButton {
-                    icon: @image-url("../assets/toolbar-palette.svg");
-                    label: "切换配色";
-                    selected: palette_open;
-                    clicked => {
-                        root.palette_open = !root.palette_open;
-                    }
-                }
             }
         }
 
         Text {
             x: content_left;
-            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + 2px;
+            y: lyric_top + primary_wave_offset + 2px;
             width: lyric_line_width;
             text: line_1;
-            color: #000000c4;
+            color: shadow_color;
             font-family: lyric_font;
-            font-size: primary_font_size;
+            font-size: active_primary_font_size;
             font-weight: 800;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
+            opacity: line_1_opacity;
+            animate y { duration: 180ms; easing: ease-in-out; }
         }
 
         Text {
             x: content_left;
-            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2;
+            y: lyric_top + primary_wave_offset;
             width: lyric_line_width;
             text: line_1;
-            color: primary_unplayed_fill;
+            color: line_1_unplayed_fill;
             font-family: lyric_font;
-            font-size: primary_font_size;
+            font-size: active_primary_font_size;
             font-weight: 800;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
-            stroke: #04110de0;
-            stroke-width: 1.6px;
+            stroke: stroke_color;
+            stroke-width: 2.1px;
             stroke-style: outside;
+            opacity: line_1_opacity;
+            animate y { duration: 180ms; easing: ease-in-out; }
         }
 
         Rectangle {
             x: content_left;
-            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2;
+            y: lyric_top - 3px;
             width: lyric_line_width * Math.max(0.0, Math.min(progress_1, 1.0));
-            height: primary_font_size + 6px;
+            height: active_primary_font_size + 12px;
             clip: true;
             background: #00000000;
             border-radius: 3px;
+            animate width, y { duration: 180ms; easing: ease-in-out; }
 
             Text {
                 x: 0px;
-                y: 0px;
+                y: 3px;
                 width: lyric_line_width;
                 text: line_1;
-                color: primary_fill;
+                color: line_1_fill;
                 font-family: lyric_font;
-                font-size: primary_font_size;
+                font-size: active_primary_font_size;
                 font-weight: 800;
                 wrap: no-wrap;
                 overflow: clip;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                stroke: #04110de0;
-                stroke-width: 1.6px;
+                stroke: stroke_color;
+                stroke-width: 2.1px;
                 stroke-style: outside;
             }
         }
 
         Text {
             x: content_left;
-            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + primary_font_size + 10px + 1px;
+            y: lyric_top + active_primary_font_size + line_gap + 2px;
             width: lyric_line_width;
             text: line_2;
-            color: #0000009a;
+            color: shadow_color;
             font-family: lyric_font;
             font-size: secondary_font_size;
-            font-weight: 650;
+            font-weight: 720;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
+            opacity: show_second ? line_2_opacity : 0;
+            animate y, opacity { duration: 180ms; easing: ease-in-out; }
         }
 
         Text {
             x: content_left;
-            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + primary_font_size + 8px;
+            y: lyric_top + active_primary_font_size + line_gap;
             width: lyric_line_width;
             text: line_2;
-            color: secondary_unplayed_fill;
+            color: line_2_unplayed_fill;
             font-family: lyric_font;
             font-size: secondary_font_size;
-            font-weight: 650;
+            font-weight: 720;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
-            stroke: #0a1119c8;
-            stroke-width: 1.1px;
+            stroke: stroke_color;
+            stroke-width: 1.8px;
             stroke-style: outside;
+            opacity: show_second ? line_2_opacity : 0;
+            animate y, opacity { duration: 180ms; easing: ease-in-out; }
         }
 
         Rectangle {
             x: content_left;
-            y: (panel_height * 1px - button_area_h - primary_font_size - secondary_font_size - 10px) / 2 + primary_font_size + 8px;
+            y: lyric_top + active_primary_font_size + line_gap - 3px;
             width: lyric_line_width * Math.max(0.0, Math.min(progress_2, 1.0));
-            height: secondary_font_size + 6px;
+            height: secondary_font_size + 12px;
             clip: true;
             background: #00000000;
             border-radius: 2px;
+            opacity: show_second ? line_2_opacity : 0;
+            animate width, y, opacity { duration: 180ms; easing: ease-in-out; }
 
             Text {
                 x: 0px;
-                y: 0px;
+                y: 3px;
                 width: lyric_line_width;
                 text: line_2;
-                color: secondary_fill;
+                color: line_2_fill;
                 font-family: lyric_font;
                 font-size: secondary_font_size;
-                font-weight: 650;
+                font-weight: 720;
                 wrap: no-wrap;
                 overflow: clip;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                stroke: #0a1119c8;
-                stroke-width: 1.1px;
+                stroke: stroke_color;
+                stroke-width: 1.8px;
                 stroke-style: outside;
             }
         }
@@ -280,7 +305,7 @@ export component LyricsOverlay inherits Window {
             y: parent.height - 16px;
             width: 10px;
             height: 10px;
-            background: #ffffffa8;
+            background: resize_handle_brush;
             border-radius: 2px;
         }
 
@@ -320,69 +345,6 @@ export component LyricsOverlay inherits Window {
             moved => {
                 if (self.pressed) {
                     root.request-resize(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
-        }
-
-        if !locked && palette_open : Rectangle {
-            x: (parent.width - 228px) / 2;
-            y: 10px;
-            width: 228px;
-            height: 54px;
-            background: @linear-gradient(180deg, #000000d8 0%, #000000e0 100%);
-            border-width: 1px;
-            border-color: #ffffff2f;
-            border-radius: 8px;
-
-            VerticalLayout {
-                x: 8px;
-                y: 7px;
-                width: parent.width - 16px;
-                height: parent.height - 14px;
-                spacing: 3px;
-
-                HorizontalLayout {
-                    spacing: 6px;
-                    alignment: center;
-
-                    Text {
-                        text: "颜色: #";
-                        color: #ffffff;
-                        font-size: 12px;
-                        font-weight: 500;
-                        vertical-alignment: center;
-                    }
-
-                    input_box := Rectangle {
-                        width: 120px;
-                        height: 22px;
-                        background: #111111e6;
-                        border-width: 1px;
-                        border-color: #ffffff26;
-                        border-radius: 4px;
-
-                        palette_input := TextInput {
-                            x: 6px;
-                            y: 2px;
-                            width: parent.width - 12px;
-                            height: parent.height - 4px;
-                            text: root.palette_color;
-                            color: #f8fbff;
-                            selection-background-color: #56ffc1;
-                            font-size: 12px;
-                            input-type: text;
-                            accepted => {
-                                root.request-set-palette(self.text);
-                                root.palette_open = false;
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    text: "按 Enter 确认";
-                    color: #ffffff99;
-                    font-size: 10px;
                 }
             }
         }

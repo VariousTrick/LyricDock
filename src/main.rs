@@ -2,7 +2,7 @@ use ksni::blocking::TrayMethods;
 use layer_shika_adapters::SurfaceState;
 use layer_shika::calloop::TimeoutAction;
 use layer_shika::prelude::*;
-use layer_shika::slint::SharedString;
+use layer_shika::slint::{Brush, Color, SharedString};
 use layer_shika::slint_interpreter::Value;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -30,6 +30,18 @@ const LEGACY_LYRICS_DIR: &str = "lyrics-cache";
 struct AppSettingsFile {
     lyrics_dir: Option<String>,
     cache_limit_mb: Option<u64>,
+    show_secondary_line: Option<bool>,
+    use_gradient: Option<bool>,
+    font_family: Option<String>,
+    highlight_color: Option<String>,
+    base_color: Option<String>,
+    preview_color: Option<String>,
+    stroke_color: Option<String>,
+    shadow_color: Option<String>,
+    panel_background_color: Option<String>,
+    panel_border_color: Option<String>,
+    resize_handle_color: Option<String>,
+    preview_opacity: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +50,18 @@ struct AppSettings {
     imported_dir: PathBuf,
     cache_dir: PathBuf,
     cache_limit_bytes: u64,
+    show_secondary_line: bool,
+    use_gradient: bool,
+    font_family: String,
+    highlight_color: String,
+    base_color: String,
+    preview_color: String,
+    stroke_color: String,
+    shadow_color: String,
+    panel_background_color: String,
+    panel_border_color: String,
+    resize_handle_color: String,
+    preview_opacity: f32,
     config_path: PathBuf,
 }
 
@@ -62,6 +86,57 @@ impl AppSettings {
             .as_ref()
             .and_then(|settings| settings.cache_limit_mb)
             .unwrap_or(256);
+        let show_secondary_line = parsed
+            .as_ref()
+            .and_then(|settings| settings.show_secondary_line)
+            .unwrap_or(true);
+        let use_gradient = parsed
+            .as_ref()
+            .and_then(|settings| settings.use_gradient)
+            .unwrap_or(false);
+        let font_family = parsed
+            .as_ref()
+            .and_then(|settings| settings.font_family.clone())
+            .unwrap_or_else(|| {
+                "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif".to_string()
+            });
+        let highlight_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.highlight_color.clone())
+            .unwrap_or_else(|| "#00e676".to_string());
+        let base_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.base_color.clone())
+            .unwrap_or_else(|| "#f5f7fb".to_string());
+        let preview_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.preview_color.clone())
+            .unwrap_or_else(|| "#f5f7fb".to_string());
+        let stroke_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.stroke_color.clone())
+            .unwrap_or_else(|| "#081019e0".to_string());
+        let shadow_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.shadow_color.clone())
+            .unwrap_or_else(|| "#000000c4".to_string());
+        let panel_background_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.panel_background_color.clone())
+            .unwrap_or_else(|| "#00000095".to_string());
+        let panel_border_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.panel_border_color.clone())
+            .unwrap_or_else(|| "#ffffff28".to_string());
+        let resize_handle_color = parsed
+            .as_ref()
+            .and_then(|settings| settings.resize_handle_color.clone())
+            .unwrap_or_else(|| "#ffffffa8".to_string());
+        let preview_opacity = parsed
+            .as_ref()
+            .and_then(|settings| settings.preview_opacity)
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
 
         let _ = fs::create_dir_all(&imported_dir);
         let _ = fs::create_dir_all(&cache_dir);
@@ -71,6 +146,18 @@ impl AppSettings {
             imported_dir,
             cache_dir,
             cache_limit_bytes: cache_limit_mb.saturating_mul(1024 * 1024),
+            show_secondary_line,
+            use_gradient,
+            font_family,
+            highlight_color,
+            base_color,
+            preview_color,
+            stroke_color,
+            shadow_color,
+            panel_background_color,
+            panel_border_color,
+            resize_handle_color,
+            preview_opacity,
             config_path,
         }
     }
@@ -84,7 +171,6 @@ struct PreviewData {
     panel_x: Option<i32>,
     panel_y: Option<i32>,
     font_scale: Option<i32>,
-    palette_color: Option<String>,
 }
 
 impl Default for PreviewData {
@@ -96,7 +182,6 @@ impl Default for PreviewData {
             panel_x: Some(36),
             panel_y: Some(24),
             font_scale: Some(0),
-            palette_color: Some("#56ffc1".to_string()),
         }
     }
 }
@@ -114,6 +199,14 @@ struct TrackInfo {
 #[derive(Debug, Clone)]
 struct LyricLine {
     time_ms: u64,
+    end_time_ms: u64,
+    text: String,
+    segments: Vec<LyricSegment>,
+}
+
+#[derive(Debug, Clone)]
+struct LyricSegment {
+    start_time_ms: u64,
     end_time_ms: u64,
     text: String,
 }
@@ -135,12 +228,25 @@ struct RenderState {
     line_2: String,
     progress_1: f32,
     progress_2: f32,
+    line_1_active: bool,
+    line_2_active: bool,
     scroll_1: f32,
     scroll_2: f32,
     offset_1: f32,
     offset_2: f32,
     font_scale: i32,
-    palette_color: String,
+    show_secondary_line: bool,
+    use_gradient: bool,
+    font_family: String,
+    highlight_color: String,
+    base_color: String,
+    preview_color: String,
+    stroke_color: String,
+    shadow_color: String,
+    panel_background_color: String,
+    panel_border_color: String,
+    resize_handle_color: String,
+    preview_opacity: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +255,8 @@ struct LyricRenderPair {
     line_2: String,
     progress_1: f32,
     progress_2: f32,
+    line_1_active: bool,
+    line_2_active: bool,
 }
 
 #[derive(Debug, Default)]
@@ -462,24 +570,6 @@ fn main() -> Result<()> {
     }
 
     {
-        let preview_path_for_palette = preview_path.clone();
-        let preview_state = Rc::clone(&shared_preview);
-        let tray_preview_state = Arc::clone(&tray_preview_state);
-        shell.select(Surface::named(SURFACE_NAME))
-            .on_callback_with_args("request-set-palette", move |args, _| {
-                if let Some(Value::String(color_str)) = args.first() {
-                    let mut preview = preview_state.borrow_mut();
-                    preview.palette_color = Some(color_str.to_string());
-                    if let Ok(mut tray_preview) = tray_preview_state.lock() {
-                        *tray_preview = preview.clone();
-                    }
-                    write_preview_data(&preview_path_for_palette, &preview);
-                }
-                true
-            });
-    }
-
-    {
         let preview_path_for_move_2 = preview_path.clone();
         let preview_state = Rc::clone(&shared_preview);
         let preview_state_2 = Rc::clone(&shared_preview);
@@ -611,12 +701,25 @@ fn main() -> Result<()> {
                 line_2: String::new(),
                 progress_1: 1.0,
                 progress_2: 0.0,
+                line_1_active: true,
+                line_2_active: false,
                 scroll_1: 0.0,
                 scroll_2: 0.0,
                 offset_1: 0.0,
                 offset_2: 0.0,
                 font_scale: preview.font_scale.unwrap_or(0),
-                palette_color: preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string()),
+                show_secondary_line: settings_for_timer.show_secondary_line,
+                use_gradient: settings_for_timer.use_gradient,
+                font_family: settings_for_timer.font_family.clone(),
+                highlight_color: settings_for_timer.highlight_color.clone(),
+                base_color: settings_for_timer.base_color.clone(),
+                preview_color: settings_for_timer.preview_color.clone(),
+                stroke_color: settings_for_timer.stroke_color.clone(),
+                shadow_color: settings_for_timer.shadow_color.clone(),
+                panel_background_color: settings_for_timer.panel_background_color.clone(),
+                panel_border_color: settings_for_timer.panel_border_color.clone(),
+                resize_handle_color: settings_for_timer.resize_handle_color.clone(),
+                preview_opacity: settings_for_timer.preview_opacity,
             });
             render.locked = preview.locked.unwrap_or(false);
             render.width = preview.panel_width.unwrap_or(640);
@@ -624,7 +727,18 @@ fn main() -> Result<()> {
             render.x = preview.panel_x.unwrap_or(36).max(0);
             render.y = preview.panel_y.unwrap_or(24).max(0);
             render.font_scale = preview.font_scale.unwrap_or(0);
-            render.palette_color = preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string());
+            render.show_secondary_line = settings_for_timer.show_secondary_line;
+            render.use_gradient = settings_for_timer.use_gradient;
+            render.font_family = settings_for_timer.font_family.clone();
+            render.highlight_color = settings_for_timer.highlight_color.clone();
+            render.base_color = settings_for_timer.base_color.clone();
+            render.preview_color = settings_for_timer.preview_color.clone();
+            render.stroke_color = settings_for_timer.stroke_color.clone();
+            render.shadow_color = settings_for_timer.shadow_color.clone();
+            render.panel_background_color = settings_for_timer.panel_background_color.clone();
+            render.panel_border_color = settings_for_timer.panel_border_color.clone();
+            render.resize_handle_color = settings_for_timer.resize_handle_color.clone();
+            render.preview_opacity = settings_for_timer.preview_opacity;
             render
         } else {
             let playback = mpris_for_timer
@@ -647,12 +761,25 @@ fn main() -> Result<()> {
                 line_2: lyric_pair.line_2,
                 progress_1: lyric_pair.progress_1,
                 progress_2: lyric_pair.progress_2,
+                line_1_active: lyric_pair.line_1_active,
+                line_2_active: lyric_pair.line_2_active,
                 scroll_1: 0.0,
                 scroll_2: 0.0,
                 offset_1: 0.0,
                 offset_2: 0.0,
                 font_scale: preview.font_scale.unwrap_or(0),
-                palette_color: preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string()),
+                show_secondary_line: settings_for_timer.show_secondary_line,
+                use_gradient: settings_for_timer.use_gradient,
+                font_family: settings_for_timer.font_family.clone(),
+                highlight_color: settings_for_timer.highlight_color.clone(),
+                base_color: settings_for_timer.base_color.clone(),
+                preview_color: settings_for_timer.preview_color.clone(),
+                stroke_color: settings_for_timer.stroke_color.clone(),
+                shadow_color: settings_for_timer.shadow_color.clone(),
+                panel_background_color: settings_for_timer.panel_background_color.clone(),
+                panel_border_color: settings_for_timer.panel_border_color.clone(),
+                resize_handle_color: settings_for_timer.resize_handle_color.clone(),
+                preview_opacity: settings_for_timer.preview_opacity,
             }
         };
 
@@ -672,12 +799,52 @@ fn main() -> Result<()> {
                 let _ = component.set_property("line_2", shared(Some(&render.line_2)));
                 let _ = component.set_property("progress_1", Value::Number(render.progress_1 as f64));
                 let _ = component.set_property("progress_2", Value::Number(render.progress_2 as f64));
+                let _ = component.set_property("line_1_active", Value::Bool(render.line_1_active));
+                let _ = component.set_property("line_2_active", Value::Bool(render.line_2_active));
                 let _ = component.set_property("scroll_1", Value::Number(render.scroll_1 as f64));
                 let _ = component.set_property("scroll_2", Value::Number(render.scroll_2 as f64));
                 let _ = component.set_property("offset_1", Value::Number(render.offset_1 as f64));
                 let _ = component.set_property("offset_2", Value::Number(render.offset_2 as f64));
                 let _ = component.set_property("font_scale", Value::Number(render.font_scale as f64));
-                let _ = component.set_property("palette_color", Value::String(render.palette_color.clone().into()));
+                let _ = component.set_property("show_secondary_line", Value::Bool(render.show_secondary_line));
+                let _ = component.set_property("use_gradient", Value::Bool(render.use_gradient));
+                let _ = component.set_property("lyric_font", Value::String(render.font_family.clone().into()));
+                let _ = component.set_property(
+                    "highlight_color",
+                    Value::Brush(Brush::from(parse_hex_color(&render.highlight_color))),
+                );
+                let _ = component.set_property(
+                    "base_color",
+                    Value::Brush(Brush::from(parse_hex_color(&render.base_color))),
+                );
+                let _ = component.set_property(
+                    "preview_color",
+                    Value::Brush(Brush::from(parse_hex_color(&render.preview_color))),
+                );
+                let _ = component.set_property(
+                    "stroke_color",
+                    Value::Brush(Brush::from(parse_hex_color(&render.stroke_color))),
+                );
+                let _ = component.set_property(
+                    "shadow_color",
+                    Value::Brush(Brush::from(parse_hex_color(&render.shadow_color))),
+                );
+                let _ = component.set_property(
+                    "panel_background_brush",
+                    Value::Brush(Brush::from(parse_hex_color(&render.panel_background_color))),
+                );
+                let _ = component.set_property(
+                    "panel_border_brush",
+                    Value::Brush(Brush::from(parse_hex_color(&render.panel_border_color))),
+                );
+                let _ = component.set_property(
+                    "resize_handle_brush",
+                    Value::Brush(Brush::from(parse_hex_color(&render.resize_handle_color))),
+                );
+                let _ = component.set_property(
+                    "preview_opacity",
+                    Value::Number(render.preview_opacity as f64),
+                );
 
                 surface.layer_surface().set_size(render.width, render.height);
                 surface
@@ -771,9 +938,29 @@ fn apply_preview_properties(
         Value::Number(preview.font_scale.unwrap_or(0) as f64),
     );
     let _ = component.set_property(
-        "palette_color",
-        Value::String(preview.palette_color.clone().unwrap_or_else(|| "#56ffc1".to_string()).into()),
+        "lyric_font",
+        Value::String("Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif".into()),
     );
+    let _ = component.set_property("show_secondary_line", Value::Bool(true));
+    let _ = component.set_property("use_gradient", Value::Bool(false));
+    let _ = component.set_property("highlight_color", Value::Brush(Brush::from(parse_hex_color("#00e676"))));
+    let _ = component.set_property("base_color", Value::Brush(Brush::from(parse_hex_color("#f5f7fb"))));
+    let _ = component.set_property("preview_color", Value::Brush(Brush::from(parse_hex_color("#f5f7fb"))));
+    let _ = component.set_property("stroke_color", Value::Brush(Brush::from(parse_hex_color("#081019e0"))));
+    let _ = component.set_property("shadow_color", Value::Brush(Brush::from(parse_hex_color("#000000c4"))));
+    let _ = component.set_property(
+        "panel_background_brush",
+        Value::Brush(Brush::from(parse_hex_color("#00000095"))),
+    );
+    let _ = component.set_property(
+        "panel_border_brush",
+        Value::Brush(Brush::from(parse_hex_color("#ffffff28"))),
+    );
+    let _ = component.set_property(
+        "resize_handle_brush",
+        Value::Brush(Brush::from(parse_hex_color("#ffffffa8"))),
+    );
+    let _ = component.set_property("preview_opacity", Value::Number(1.0));
 }
 
 fn current_lines_for_track(
@@ -789,6 +976,8 @@ fn current_lines_for_track(
             line_2: "".into(),
             progress_1: 1.0,
             progress_2: 0.0,
+            line_1_active: true,
+            line_2_active: false,
         };
     };
 
@@ -808,7 +997,7 @@ fn current_lines_for_track(
     }
 
     if let Some(active) = runtime.active_lyrics.as_ref() {
-        return lyric_pair_for_position(&active.lines, track.position_ms);
+        return lyric_pair_for_position(&active.lines, track.position_ms, settings.show_secondary_line);
     }
 
     let artist = track.artists.first().cloned().unwrap_or_default();
@@ -817,6 +1006,8 @@ fn current_lines_for_track(
         line_2: "".into(),
         progress_1: 1.0,
         progress_2: 0.0,
+        line_1_active: true,
+        line_2_active: false,
     }
 }
 
@@ -827,15 +1018,15 @@ fn load_or_fetch_lyrics(
     runtime: &mut RuntimeState,
 ) -> Option<Vec<LyricLine>> {
     if let Some(path) = find_imported_lyric_path(track, &settings.imported_dir) {
-        return read_lrc_file(&path);
+        return read_lyric_file(&path);
     }
 
     if let Some(path) = find_cached_lyric_path(track, &settings.cache_dir) {
-        return read_lrc_file(&path);
+        return read_lyric_file(&path);
     }
 
     if let Some(path) = find_cached_lyric_path(track, Path::new(LEGACY_LYRICS_DIR)) {
-        return read_lrc_file(&path);
+        return read_lyric_file(&path);
     }
 
     let key = track_cache_key(track);
@@ -857,7 +1048,7 @@ fn load_or_fetch_lyrics(
 
     find_cached_lyric_path(track, &settings.cache_dir)
         .or_else(|| find_cached_lyric_path(track, Path::new(LEGACY_LYRICS_DIR)))
-        .and_then(|path| read_lrc_file(&path))
+        .and_then(|path| read_lyric_file(&path))
 }
 
 fn find_imported_lyric_path(track: &TrackInfo, imported_dir: &Path) -> Option<PathBuf> {
@@ -871,7 +1062,8 @@ fn find_imported_lyric_path(track: &TrackInfo, imported_dir: &Path) -> Option<Pa
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("lrc") {
+        let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or_default();
+        if extension != "lrc" && extension != "yrc" {
             continue;
         }
         let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or_default();
@@ -909,13 +1101,29 @@ fn find_cached_lyric_path(track: &TrackInfo, lyrics_dir: &Path) -> Option<PathBu
             if lrc_path.exists() {
                 return Some(lrc_path);
             }
+            let mut yrc_path = path.clone();
+            yrc_path.set_extension("yrc");
+            if yrc_path.exists() {
+                return Some(yrc_path);
+            }
         }
     }
 
     None
 }
 
-fn read_lrc_file(path: &Path) -> Option<Vec<LyricLine>> {
+fn read_lyric_file(path: &Path) -> Option<Vec<LyricLine>> {
+    let mut yrc_path = path.to_path_buf();
+    yrc_path.set_extension("yrc");
+    if yrc_path.exists() {
+        if let Ok(content) = fs::read_to_string(&yrc_path) {
+            let lines = parse_yrc(&content);
+            if !lines.is_empty() {
+                return Some(lines);
+            }
+        }
+    }
+
     let content = fs::read_to_string(path).ok()?;
     let lines = parse_lrc(&content);
     (!lines.is_empty()).then_some(lines)
@@ -955,6 +1163,7 @@ fn parse_lrc(content: &str) -> Vec<LyricLine> {
                 time_ms,
                 end_time_ms: time_ms,
                 text: text.to_string(),
+                segments: Vec::new(),
             });
         }
     }
@@ -962,6 +1171,93 @@ fn parse_lrc(content: &str) -> Vec<LyricLine> {
     parsed.sort_by_key(|line| line.time_ms);
     for idx in 0..parsed.len() {
         let default_end = parsed[idx].time_ms.saturating_add(4_000);
+        let next_start = parsed.get(idx + 1).map(|line| line.time_ms).unwrap_or(default_end);
+        parsed[idx].end_time_ms = next_start.max(parsed[idx].time_ms.saturating_add(500));
+    }
+    parsed
+}
+
+fn parse_yrc(content: &str) -> Vec<LyricLine> {
+    let mut parsed = Vec::new();
+
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('{') || !trimmed.starts_with('[') {
+            continue;
+        }
+
+        let Some(header_end) = trimmed.find(']') else {
+            continue;
+        };
+        let header = &trimmed[1..header_end];
+        let mut header_parts = header.split(',');
+        let Some(start_ms) = header_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+        let Some(duration_ms) = header_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+
+        let mut rest = &trimmed[header_end + 1..];
+        let mut segments = Vec::new();
+
+        while let Some(segment_start_index) = rest.find('(') {
+            if segment_start_index > 0 {
+                rest = &rest[segment_start_index..];
+            }
+            let Some(segment_end_index) = rest.find(')') else {
+                break;
+            };
+            let segment_meta = &rest[1..segment_end_index];
+            let mut meta_parts = segment_meta.split(',');
+            let Some(seg_start) = meta_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
+                break;
+            };
+            let Some(seg_duration_cs) = meta_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
+                break;
+            };
+
+            let after_meta = &rest[segment_end_index + 1..];
+            let next_segment_index = after_meta.find('(').unwrap_or(after_meta.len());
+            let segment_text = after_meta[..next_segment_index].to_string();
+
+            if !segment_text.trim().is_empty() {
+                let seg_duration_ms = seg_duration_cs.saturating_mul(10);
+                segments.push(LyricSegment {
+                    start_time_ms: seg_start,
+                    end_time_ms: seg_start.saturating_add(seg_duration_ms.max(1)),
+                    text: segment_text,
+                });
+            }
+
+            rest = &after_meta[next_segment_index..];
+        }
+
+        if segments.is_empty() {
+            continue;
+        }
+
+        let text = segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<String>()
+            .trim()
+            .to_string();
+        if text.is_empty() || is_credit_line(&text) {
+            continue;
+        }
+
+        parsed.push(LyricLine {
+            time_ms: start_ms,
+            end_time_ms: start_ms.saturating_add(duration_ms.max(1)),
+            text,
+            segments,
+        });
+    }
+
+    parsed.sort_by_key(|line| line.time_ms);
+    for idx in 0..parsed.len() {
+        let default_end = parsed[idx].end_time_ms.max(parsed[idx].time_ms.saturating_add(500));
         let next_start = parsed.get(idx + 1).map(|line| line.time_ms).unwrap_or(default_end);
         parsed[idx].end_time_ms = next_start.max(parsed[idx].time_ms.saturating_add(500));
     }
@@ -987,6 +1283,23 @@ fn parse_timestamp(tag: &str) -> Option<u64> {
     };
 
     Some(minutes * 60_000 + seconds * 1_000 + millis)
+}
+
+fn parse_hex_color(input: &str) -> Color {
+    let text = input.trim().trim_start_matches('#');
+    let bytes = match text.len() {
+        6 => u32::from_str_radix(text, 16).ok().map(|value| 0xff00_0000u32 | value),
+        8 => u32::from_str_radix(text, 16).ok(),
+        _ => None,
+    }
+    .unwrap_or(0xffff_ffff);
+
+    Color::from_argb_u8(
+        ((bytes >> 24) & 0xff) as u8,
+        ((bytes >> 16) & 0xff) as u8,
+        ((bytes >> 8) & 0xff) as u8,
+        (bytes & 0xff) as u8,
+    )
 }
 
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
@@ -1024,37 +1337,68 @@ fn hsv_to_hex_color(h: f32, s: f32, v: f32) -> String {
     format!("#{:02x}{:02x}{:02x}", r, g, b)
 }
 
-fn lyric_pair_for_position(lines: &[LyricLine], position_ms: u64) -> LyricRenderPair {
+fn lyric_pair_for_position(
+    lines: &[LyricLine],
+    position_ms: u64,
+    show_secondary_line: bool,
+) -> LyricRenderPair {
     if lines.is_empty() {
         return LyricRenderPair {
             line_1: "未找到歌词".into(),
             line_2: "".into(),
             progress_1: 1.0,
             progress_2: 0.0,
+            line_1_active: true,
+            line_2_active: false,
         };
     }
 
     let current_index = find_current_line_index(lines, position_ms);
-    let current = lines.get(current_index).map(|line| line.text.clone()).unwrap_or_default();
-    let next = lines
-        .get(current_index + 1)
-        .map(|line| line.text.clone())
-        .unwrap_or_default();
+    if !show_secondary_line {
+        let current = lines
+            .get(current_index)
+            .map(|line| line.text.clone())
+            .unwrap_or_default();
+        let progress_1 = lines
+            .get(current_index)
+            .map(|line| line_progress(line, position_ms))
+            .unwrap_or(0.0);
+        return LyricRenderPair {
+            line_1: current,
+            line_2: "".into(),
+            progress_1,
+            progress_2: 0.0,
+            line_1_active: true,
+            line_2_active: false,
+        };
+    }
 
-    let progress_1 = lines
-        .get(current_index)
-        .map(|line| line_progress(line, position_ms))
-        .unwrap_or(0.0);
-    let progress_2 = lines
-        .get(current_index + 1)
-        .map(|line| line_progress(line, position_ms))
-        .unwrap_or(0.0);
+    if current_index % 2 == 0 {
+        let current = lines.get(current_index);
+        let next = lines.get(current_index + 1);
+        return LyricRenderPair {
+            line_1: current.map(|line| line.text.clone()).unwrap_or_default(),
+            line_2: next.map(|line| line.text.clone()).unwrap_or_default(),
+            progress_1: current
+                .map(|line| line_progress(line, position_ms))
+                .unwrap_or(0.0),
+            progress_2: 0.0,
+            line_1_active: true,
+            line_2_active: false,
+        };
+    }
 
+    let upcoming = lines.get(current_index + 1);
+    let current = lines.get(current_index);
     LyricRenderPair {
-        line_1: current,
-        line_2: next,
-        progress_1,
-        progress_2,
+        line_1: upcoming.map(|line| line.text.clone()).unwrap_or_default(),
+        line_2: current.map(|line| line.text.clone()).unwrap_or_default(),
+        progress_1: 0.0,
+        progress_2: current
+            .map(|line| line_progress(line, position_ms))
+            .unwrap_or(0.0),
+        line_1_active: false,
+        line_2_active: current.is_some(),
     }
 }
 
@@ -1078,6 +1422,35 @@ fn find_current_line_index(lines: &[LyricLine], position_ms: u64) -> usize {
 }
 
 fn line_progress(line: &LyricLine, position_ms: u64) -> f32 {
+    if !line.segments.is_empty() {
+        let total_width: usize = line
+            .segments
+            .iter()
+            .map(|segment| UnicodeWidthStr::width(segment.text.as_str()).max(1))
+            .sum();
+        if total_width == 0 {
+            return 0.0;
+        }
+
+        let mut sung_width = 0.0f32;
+        for segment in &line.segments {
+            let segment_width = UnicodeWidthStr::width(segment.text.as_str()).max(1) as f32;
+            if position_ms >= segment.end_time_ms {
+                sung_width += segment_width;
+                continue;
+            }
+            if position_ms > segment.start_time_ms {
+                let duration = segment.end_time_ms.saturating_sub(segment.start_time_ms).max(1);
+                let segment_progress =
+                    (position_ms.saturating_sub(segment.start_time_ms)) as f32 / duration as f32;
+                sung_width += segment_width * segment_progress.clamp(0.0, 1.0);
+            }
+            break;
+        }
+
+        return (sung_width / total_width as f32).clamp(0.0, 1.0);
+    }
+
     if position_ms <= line.time_ms {
         return 0.0;
     }
