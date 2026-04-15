@@ -498,6 +498,7 @@ impl WaylandPassthrough {
 fn main() -> Result<()> {
     let settings = AppSettings::from_file(Path::new(SETTINGS_FILE).to_path_buf());
     let preview_path = Path::new(PREVIEW_FILE).to_path_buf();
+    ensure_preview_file(&preview_path);
     let initial_preview = read_preview_data(&preview_path);
     let shared_preview = Rc::new(RefCell::new(initial_preview.clone()));
     let tray_preview_state = Arc::new(Mutex::new(initial_preview.clone()));
@@ -915,6 +916,15 @@ fn read_preview_data(path: &Path) -> PreviewData {
         .ok()
         .and_then(|content| serde_json::from_str::<PreviewData>(&content).ok())
         .unwrap_or_default()
+}
+
+fn ensure_preview_file(path: &Path) {
+    if path.exists() {
+        return;
+    }
+
+    let preview = PreviewData::default();
+    write_preview_data(path, &preview);
 }
 
 fn apply_preview_properties(
