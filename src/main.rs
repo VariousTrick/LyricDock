@@ -1,11 +1,10 @@
 use ksni::blocking::TrayMethods;
+use layer_shika_adapters::SurfaceState;
 use layer_shika::calloop::TimeoutAction;
 use layer_shika::prelude::*;
 use layer_shika::slint::SharedString;
 use layer_shika::slint_interpreter::Value;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use serde::{Deserialize, Serialize};
-use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -16,10 +15,9 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr;
-use wayland_backend::client::{Backend as WlBackend, ObjectId as WlObjectId};
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{wl_compositor, wl_region, wl_registry, wl_surface};
-use wayland_client::{delegate_noop, Connection as WlConnection, Dispatch, Proxy, QueueHandle};
+use wayland_client::{delegate_noop, Connection as WlConnection, Dispatch, QueueHandle};
 use zbus::blocking::{Connection as DBusConnection, Proxy as DBusProxy};
 use zvariant::OwnedValue;
 
@@ -271,31 +269,18 @@ struct WaylandPassthrough {
 }
 
 impl WaylandPassthrough {
-    fn from_component(component: &layer_shika::slint_interpreter::ComponentInstance) -> Option<Self> {
-        let window = component.window();
-        let window_handle = window.window_handle();
-        let display_handle = window.window_handle();
-
-        let (surface_ptr, display_ptr) = match (
-            window_handle.window_handle().ok()?.as_raw(),
-            display_handle.display_handle().ok()?.as_raw(),
-        ) {
-            (
-                RawWindowHandle::Wayland(window),
-                RawDisplayHandle::Wayland(display),
-            ) => (window.surface.as_ptr(), display.display.as_ptr()),
-            _ => return None,
+    fn from_surface_state(surface_state: &SurfaceState) -> Option<Self> {
+        let connection: WlConnection = surface_state.surface().connection().as_ref().clone();
+        let (globals, event_queue) = match registry_queue_init::<WaylandNoopState>(&connection) {
+            Ok(value) => value,
+            Err(_) => return None,
         };
-
-        let backend = unsafe { WlBackend::from_foreign_display(display_ptr.cast()) };
-        let connection = WlConnection::from_backend(backend);
-        let (globals, event_queue) = registry_queue_init::<WaylandNoopState>(&connection).ok()?;
         let queue_handle = event_queue.handle();
-        let compositor = globals.bind(&queue_handle, 1..=6, ()).ok()?;
-        let object_id =
-            unsafe { WlObjectId::from_ptr(&wl_surface::WlSurface::interface(), surface_ptr.cast()) }
-                .ok()?;
-        let surface = wl_surface::WlSurface::from_id(&connection, object_id).ok()?;
+        let compositor = match globals.bind(&queue_handle, 1..=6, ()) {
+            Ok(value) => value,
+            Err(_) => return None,
+        };
+        let surface: wl_surface::WlSurface = surface_state.surface().inner().as_ref().clone();
 
         Some(Self {
             connection,
@@ -307,18 +292,17 @@ impl WaylandPassthrough {
     }
 
     fn set_interactive(&mut self, interactive: bool) {
+        let region = self.compositor.create_region(&self.queue_handle, ());
         if interactive {
-            self.surface.set_input_region(None);
+            region.add(0, 0, i32::MAX, i32::MAX);
         } else {
-            let region = self.compositor.create_region(&self.queue_handle, ());
-            region.add(0, 0, 0, 0);
-            self.surface.set_input_region(Some(&region));
-            region.destroy();
         }
+        self.surface.set_input_region(Some(&region));
+        region.destroy();
 
         self.surface.commit();
         let _ = self.connection.flush();
-        let _ = self.event_queue.dispatch_pending(&mut WaylandNoopState);
+        let _ = self.event_queue.roundtrip(&mut WaylandNoopState);
     }
 }
 
@@ -591,7 +575,6 @@ fn main() -> Result<()> {
         }
 
         let needs_passthrough_update = runtime.last_locked != Some(render.locked);
-
         if runtime.last_render.as_ref() != Some(&render) {
             for surface in app_state.surfaces_by_name_mut(SURFACE_NAME) {
                 let component = surface.component_instance();
@@ -618,7 +601,7 @@ fn main() -> Result<()> {
 
                 if needs_passthrough_update {
                     if runtime.passthrough.is_none() {
-                        runtime.passthrough = WaylandPassthrough::from_component(component);
+                        runtime.passthrough = WaylandPassthrough::from_surface_state(surface);
                     }
                     if let Some(passthrough) = runtime.passthrough.as_mut() {
                         passthrough.set_interactive(!render.locked);
@@ -637,9 +620,8 @@ fn main() -> Result<()> {
             runtime.last_render = Some(render.clone());
         } else if needs_passthrough_update {
             for surface in app_state.surfaces_by_name_mut(SURFACE_NAME) {
-                let component = surface.component_instance();
                 if runtime.passthrough.is_none() {
-                    runtime.passthrough = WaylandPassthrough::from_component(component);
+                    runtime.passthrough = WaylandPassthrough::from_surface_state(surface);
                 }
             }
             if let Some(passthrough) = runtime.passthrough.as_mut() {
