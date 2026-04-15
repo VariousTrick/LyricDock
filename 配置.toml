@@ -1,0 +1,16 @@
+# LyricDock 配置文件
+#
+# `lyrics_dir`:
+#   歌词根目录。程序会在这个目录下自动创建：
+#   - 导入歌词/
+#   - 缓存歌词/
+#   你手动导入的歌词请放进 `导入歌词/`。
+#   程序自动抓取的歌词会放进 `缓存歌词/`。
+#
+# `cache_limit_mb`:
+#   自动缓存歌词的大小上限，单位是 MB。
+#   超出后只会清理 `缓存歌词/` 里的旧歌词，
+#   不会删除你手动放进 `导入歌词/` 的文件。
+
+lyrics_dir = "/home/Arch/Downloads/vscode/LyricDock/lyrics-cache"
+cache_limit_mb = 256

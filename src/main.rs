@@ -23,7 +23,58 @@ use zvariant::OwnedValue;
 
 const SURFACE_NAME: &str = "LyricsOverlay";
 const PREVIEW_FILE: &str = "调试面板.json";
-const LYRICS_DIR: &str = "lyrics-cache";
+const SETTINGS_FILE: &str = "配置.toml";
+const LEGACY_LYRICS_DIR: &str = "lyrics-cache";
+
+#[derive(Debug, Clone, Deserialize)]
+struct AppSettingsFile {
+    lyrics_dir: Option<String>,
+    cache_limit_mb: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct AppSettings {
+    lyrics_root: PathBuf,
+    imported_dir: PathBuf,
+    cache_dir: PathBuf,
+    cache_limit_bytes: u64,
+    config_path: PathBuf,
+}
+
+impl AppSettings {
+    fn from_file(config_path: PathBuf) -> Self {
+        ensure_settings_file(&config_path);
+        let parsed = fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|content| toml::from_str::<AppSettingsFile>(&content).ok());
+        let base_dir = config_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let lyrics_dir = parsed
+            .as_ref()
+            .and_then(|settings| settings.lyrics_dir.as_deref())
+            .unwrap_or("./歌词数据");
+        let lyrics_root = resolve_config_path(&base_dir, lyrics_dir);
+        let imported_dir = lyrics_root.join("导入歌词");
+        let cache_dir = lyrics_root.join("缓存歌词");
+        let cache_limit_mb = parsed
+            .as_ref()
+            .and_then(|settings| settings.cache_limit_mb)
+            .unwrap_or(256);
+
+        let _ = fs::create_dir_all(&imported_dir);
+        let _ = fs::create_dir_all(&cache_dir);
+
+        Self {
+            lyrics_root,
+            imported_dir,
+            cache_dir,
+            cache_limit_bytes: cache_limit_mb.saturating_mul(1024 * 1024),
+            config_path,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 struct PreviewData {
@@ -179,6 +230,9 @@ struct LyricDockTray {
     locked: bool,
     preview_path: String,
     preview_state: Arc<Mutex<PreviewData>>,
+    config_path: String,
+    lyrics_root: String,
+    cache_dir: String,
 }
 
 impl ksni::Tray for LyricDockTray {
@@ -224,6 +278,33 @@ impl ksni::Tray for LyricDockTray {
                         preview.locked = Some(tray.locked);
                         write_preview_data(Path::new(&tray.preview_path), &preview);
                     }
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "打开配置文件".into(),
+                icon_name: "document-open".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    open_path(Path::new(&tray.config_path));
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "打开歌词目录".into(),
+                icon_name: "folder-music".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    open_path(Path::new(&tray.lyrics_root));
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "清理缓存歌词".into(),
+                icon_name: "edit-clear".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    clear_cache_dir(Path::new(&tray.cache_dir));
                 }),
                 ..Default::default()
             }
@@ -307,6 +388,7 @@ impl WaylandPassthrough {
 }
 
 fn main() -> Result<()> {
+    let settings = AppSettings::from_file(Path::new(SETTINGS_FILE).to_path_buf());
     let preview_path = Path::new(PREVIEW_FILE).to_path_buf();
     let initial_preview = read_preview_data(&preview_path);
     let shared_preview = Rc::new(RefCell::new(initial_preview.clone()));
@@ -319,6 +401,9 @@ fn main() -> Result<()> {
         locked: initial_preview.locked.unwrap_or(false),
         preview_path: preview_path.to_string_lossy().into_owned(),
         preview_state: Arc::clone(&tray_preview_state),
+        config_path: settings.config_path.to_string_lossy().into_owned(),
+        lyrics_root: settings.lyrics_root.to_string_lossy().into_owned(),
+        cache_dir: settings.cache_dir.to_string_lossy().into_owned(),
     }
     .spawn()
     .ok();
@@ -502,6 +587,7 @@ fn main() -> Result<()> {
     let interaction_state_for_timer = Rc::clone(&interaction_state);
     let runtime_state_for_timer = Rc::clone(&runtime_state);
     let mpris_for_timer = Rc::clone(&mpris_client);
+    let settings_for_timer = settings.clone();
 
     event_loop.add_timer(Duration::from_millis(200), move |_, app_state| {
         if let Ok(tray_preview) = tray_preview_state_for_timer.lock() {
@@ -548,7 +634,7 @@ fn main() -> Result<()> {
             let lyric_pair = current_lines_for_track(
                 playback.as_ref(),
                 &mut runtime,
-                Path::new(LYRICS_DIR),
+                &settings_for_timer,
                 Path::new("scripts/fetch-current-song-lyrics.js"),
             );
             RenderState {
@@ -693,7 +779,7 @@ fn apply_preview_properties(
 fn current_lines_for_track(
     playback: Option<&TrackInfo>,
     runtime: &mut RuntimeState,
-    lyrics_dir: &Path,
+    settings: &AppSettings,
     fetch_script: &Path,
 ) -> LyricRenderPair {
     let Some(track) = playback else {
@@ -714,7 +800,7 @@ fn current_lines_for_track(
         .unwrap_or(true);
 
     if should_reload {
-        runtime.active_lyrics = load_or_fetch_lyrics(track, lyrics_dir, fetch_script, runtime)
+        runtime.active_lyrics = load_or_fetch_lyrics(track, settings, fetch_script, runtime)
             .map(|lines| ActiveLyrics {
                 track_key: track_key.clone(),
                 lines,
@@ -736,11 +822,19 @@ fn current_lines_for_track(
 
 fn load_or_fetch_lyrics(
     track: &TrackInfo,
-    lyrics_dir: &Path,
+    settings: &AppSettings,
     fetch_script: &Path,
     runtime: &mut RuntimeState,
 ) -> Option<Vec<LyricLine>> {
-    if let Some(path) = find_cached_lyric_path(track, lyrics_dir) {
+    if let Some(path) = find_imported_lyric_path(track, &settings.imported_dir) {
+        return read_lrc_file(&path);
+    }
+
+    if let Some(path) = find_cached_lyric_path(track, &settings.cache_dir) {
+        return read_lrc_file(&path);
+    }
+
+    if let Some(path) = find_cached_lyric_path(track, Path::new(LEGACY_LYRICS_DIR)) {
         return read_lrc_file(&path);
     }
 
@@ -754,12 +848,40 @@ fn load_or_fetch_lyrics(
     if should_fetch {
         let _ = Command::new("node")
             .arg(fetch_script)
+            .env("LYRICDOCK_CACHE_DIR", &settings.cache_dir)
             .current_dir(Path::new("."))
             .status();
         runtime.last_fetch_attempt = Some((key.clone(), Instant::now()));
+        enforce_cache_limit(&settings.cache_dir, settings.cache_limit_bytes);
     }
 
-    find_cached_lyric_path(track, lyrics_dir).and_then(|path| read_lrc_file(&path))
+    find_cached_lyric_path(track, &settings.cache_dir)
+        .or_else(|| find_cached_lyric_path(track, Path::new(LEGACY_LYRICS_DIR)))
+        .and_then(|path| read_lrc_file(&path))
+}
+
+fn find_imported_lyric_path(track: &TrackInfo, imported_dir: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(imported_dir).ok()?;
+    let artist = track
+        .artists
+        .first()
+        .map(|item| normalize_for_match(item))
+        .unwrap_or_default();
+    let title = normalize_for_match(&track.title);
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("lrc") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or_default();
+        let normalized_stem = normalize_filename_for_match(stem);
+        if normalized_stem.contains(&artist) && normalized_stem.contains(&title) {
+            return Some(path);
+        }
+    }
+
+    None
 }
 
 fn find_cached_lyric_path(track: &TrackInfo, lyrics_dir: &Path) -> Option<PathBuf> {
@@ -1006,6 +1128,10 @@ fn normalize_for_match(text: &str) -> String {
         .join(" ")
 }
 
+fn normalize_filename_for_match(text: &str) -> String {
+    normalize_for_match(&text.replace('-', " ").replace('_', " "))
+}
+
 fn track_cache_key(track: &TrackInfo) -> String {
     format!(
         "{}::{}",
@@ -1033,6 +1159,118 @@ fn write_preview_data(path: &Path, preview: &PreviewData) {
     if let Ok(content) = serde_json::to_string_pretty(preview) {
         let _ = fs::write(path, content);
     }
+}
+
+fn ensure_settings_file(path: &Path) {
+    if path.exists() {
+        return;
+    }
+
+    let default_content = include_str!("../配置.toml");
+    let _ = fs::write(path, default_content);
+}
+
+fn resolve_config_path(base_dir: &Path, configured: &str) -> PathBuf {
+    let configured_path = PathBuf::from(configured);
+    if configured_path.is_absolute() {
+        configured_path
+    } else {
+        base_dir.join(configured_path)
+    }
+}
+
+fn open_path(path: &Path) {
+    let _ = Command::new("xdg-open").arg(path).spawn();
+}
+
+fn clear_cache_dir(cache_dir: &Path) {
+    let Ok(entries) = fs::read_dir(cache_dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+fn enforce_cache_limit(cache_dir: &Path, limit_bytes: u64) {
+    if limit_bytes == 0 {
+        return;
+    }
+
+    let mut groups = cache_file_groups(cache_dir);
+    let mut total_size: u64 = groups.iter().map(|group| group.total_size).sum();
+
+    if total_size <= limit_bytes {
+        return;
+    }
+
+    groups.sort_by_key(|group| group.modified_unix_secs);
+    for group in groups {
+        if total_size <= limit_bytes {
+            break;
+        }
+        total_size = total_size.saturating_sub(group.total_size);
+        for file in group.files {
+            let _ = fs::remove_file(file);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CacheFileGroup {
+    modified_unix_secs: u64,
+    total_size: u64,
+    files: Vec<PathBuf>,
+}
+
+fn cache_file_groups(cache_dir: &Path) -> Vec<CacheFileGroup> {
+    let Ok(entries) = fs::read_dir(cache_dir) else {
+        return Vec::new();
+    };
+
+    let mut groups: HashMap<String, CacheFileGroup> = HashMap::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let metadata = match entry.metadata() {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let modified_unix_secs = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let total_size = metadata.len();
+
+        groups
+            .entry(stem)
+            .and_modify(|group| {
+                group.total_size = group.total_size.saturating_add(total_size);
+                group.modified_unix_secs = group.modified_unix_secs.min(modified_unix_secs);
+                group.files.push(path.clone());
+            })
+            .or_insert_with(|| CacheFileGroup {
+                modified_unix_secs,
+                total_size,
+                files: vec![path.clone()],
+            });
+    }
+
+    groups.into_values().collect()
 }
 
 fn tray_icon() -> ksni::Icon {

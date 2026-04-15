@@ -61,6 +61,26 @@ function normalizeForMatch(text) {
     .trim();
 }
 
+function sanitizeFileSegment(text) {
+  return normalize(text)
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
+async function pickAvailableBaseName(outDir, preferredBaseName, uniqueSuffix) {
+  const lrcPath = path.join(outDir, `${preferredBaseName}.lrc`);
+  const jsonPath = path.join(outDir, `${preferredBaseName}.json`);
+  try {
+    await fs.access(lrcPath);
+    await fs.access(jsonPath);
+    return `${preferredBaseName} (${uniqueSuffix})`;
+  } catch {
+    return preferredBaseName;
+  }
+}
+
 function scoreCandidate(track, song) {
   let score = 0;
   const title = normalizeForMatch(track.title);
@@ -154,7 +174,9 @@ async function main() {
     throw new Error('Matched song has no lyric payload.');
   }
 
-  const outDir = path.join(process.cwd(), 'lyrics-cache');
+  const outDir = process.env.LYRICDOCK_CACHE_DIR
+    ? path.resolve(process.env.LYRICDOCK_CACHE_DIR)
+    : path.join(process.cwd(), 'lyrics-cache');
   await fs.mkdir(outDir, { recursive: true });
 
   const cacheKey = crypto
@@ -170,10 +192,10 @@ async function main() {
     .digest('hex')
     .slice(0, 12);
 
-  const baseName = `${cacheKey}-${normalizeForMatch(track.title)
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase()}`;
+  const preferredBaseName = sanitizeFileSegment(
+    `${track.artists[0] || '未知歌手'} - ${track.title}`
+  );
+  const baseName = await pickAvailableBaseName(outDir, preferredBaseName, cacheKey);
 
   const lrcPath = path.join(outDir, `${baseName}.lrc`);
   const jsonPath = path.join(outDir, `${baseName}.json`);
@@ -184,6 +206,7 @@ async function main() {
     JSON.stringify(
       {
         fetchedAt: new Date().toISOString(),
+        sourceType: 'cache',
         track,
         query,
         matched: {

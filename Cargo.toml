@@ -17,6 +17,7 @@ zbus = "5.14.0"
 zvariant = "5.10.0"
 unicode-width = "0.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
+toml = "0.8"
 
 [patch.crates-io]
 layer-shika-adapters = { path = "vendor/layer-shika-adapters" }
