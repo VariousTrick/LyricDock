@@ -276,6 +276,8 @@ struct InteractionState {
 struct RuntimeState {
     active_lyrics: Option<ActiveLyrics>,
     last_fetch_attempt: Option<(String, Instant)>,
+    last_track: Option<TrackInfo>,
+    last_track_poll: Option<Instant>,
     last_render: Option<RenderState>,
     last_locked: Option<bool>,
     passthrough: Option<WaylandPassthrough>,
@@ -680,7 +682,7 @@ fn main() -> Result<()> {
     let mpris_for_timer = Rc::clone(&mpris_client);
     let settings_for_timer = settings.clone();
 
-    event_loop.add_timer(Duration::from_millis(200), move |_, app_state| {
+    event_loop.add_timer(Duration::from_millis(16), move |_, app_state| {
         if let Ok(tray_preview) = tray_preview_state_for_timer.lock() {
             if *tray_preview != *preview_state_for_timer.borrow() {
                 *preview_state_for_timer.borrow_mut() = tray_preview.clone();
@@ -691,6 +693,11 @@ fn main() -> Result<()> {
         let interaction = interaction_state_for_timer.borrow().clone();
 
         let mut runtime = runtime_state_for_timer.borrow_mut();
+        let mut is_playing = runtime
+            .last_track
+            .as_ref()
+            .map(|track| track.playback_status.eq_ignore_ascii_case("playing"))
+            .unwrap_or(false);
         let render = if interaction.dragging || interaction.resizing || interaction.dirty {
             let mut render = runtime.last_render.clone().unwrap_or(RenderState {
                 locked: preview.locked.unwrap_or(false),
@@ -742,10 +749,36 @@ fn main() -> Result<()> {
             render.preview_opacity = settings_for_timer.preview_opacity;
             render
         } else {
-            let playback = mpris_for_timer
+            let should_poll_track = runtime
+                .last_track_poll
+                .map(|last_poll| last_poll.elapsed() >= Duration::from_millis(200))
+                .unwrap_or(true);
+            if should_poll_track {
+                runtime.last_track = mpris_for_timer
+                    .as_ref()
+                    .as_ref()
+                    .and_then(|client| client.read_track());
+                runtime.last_track_poll = Some(Instant::now());
+            }
+
+            let playback = runtime.last_track.as_ref().map(|track| {
+                let mut predicted = track.clone();
+                if predicted.playback_status.eq_ignore_ascii_case("playing") {
+                    if let Some(last_poll) = runtime.last_track_poll {
+                        let elapsed_ms = last_poll.elapsed().as_millis() as u64;
+                        predicted.position_ms = predicted
+                            .position_ms
+                            .saturating_add(elapsed_ms)
+                            .min(predicted.duration_ms);
+                    }
+                }
+                predicted
+            });
+            is_playing = playback
                 .as_ref()
-                .as_ref()
-                .and_then(|client| client.read_track());
+                .map(|track| track.playback_status.eq_ignore_ascii_case("playing"))
+                .unwrap_or(false);
+
             let lyric_pair = current_lines_for_track(
                 playback.as_ref(),
                 &mut runtime,
@@ -884,7 +917,7 @@ fn main() -> Result<()> {
         }
 
         runtime.last_locked = Some(render.locked);
-        if interaction.dragging || interaction.resizing || interaction.dirty {
+        if interaction.dragging || interaction.resizing || interaction.dirty || is_playing {
             TimeoutAction::ToDuration(Duration::from_millis(16))
         } else {
             TimeoutAction::ToDuration(Duration::from_millis(200))
@@ -1232,7 +1265,7 @@ fn parse_yrc(content: &str) -> Vec<LyricLine> {
             let segment_text = after_meta[..next_segment_index].to_string();
 
             if !segment_text.trim().is_empty() {
-                let seg_duration_ms = seg_duration_cs.saturating_mul(10);
+                let seg_duration_ms = seg_duration_cs;
                 segments.push(LyricSegment {
                     start_time_ms: seg_start,
                     end_time_ms: seg_start.saturating_add(seg_duration_ms.max(1)),

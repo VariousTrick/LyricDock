@@ -212,7 +212,7 @@ export component LyricsOverlay inherits Window {
             clip: true;
             background: #00000000;
             border-radius: 3px;
-            animate width, y { duration: 180ms; easing: ease-in-out; }
+            animate y { duration: 180ms; easing: ease-in-out; }
 
             Text {
                 x: 0px;
@@ -279,7 +279,7 @@ export component LyricsOverlay inherits Window {
             background: #00000000;
             border-radius: 2px;
             opacity: show_second ? line_2_opacity : 0;
-            animate width, y, opacity { duration: 180ms; easing: ease-in-out; }
+            animate y, opacity { duration: 180ms; easing: ease-in-out; }
 
             Text {
                 x: 0px;
