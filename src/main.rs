@@ -32,15 +32,18 @@ struct AppSettingsFile {
     cache_limit_mb: Option<u64>,
     show_secondary_line: Option<bool>,
     use_gradient: Option<bool>,
+    lyric_effect: Option<String>,
     font_family: Option<String>,
     highlight_color: Option<String>,
     base_color: Option<String>,
     preview_color: Option<String>,
     stroke_color: Option<String>,
+    stroke_width: Option<f32>,
     shadow_color: Option<String>,
     panel_background_color: Option<String>,
     panel_border_color: Option<String>,
     resize_handle_color: Option<String>,
+    lyrics_opacity: Option<f32>,
     preview_opacity: Option<f32>,
 }
 
@@ -52,15 +55,18 @@ struct AppSettings {
     cache_limit_bytes: u64,
     show_secondary_line: bool,
     use_gradient: bool,
+    lyric_effect: String,
     font_family: String,
     highlight_color: String,
     base_color: String,
     preview_color: String,
     stroke_color: String,
+    stroke_width: f32,
     shadow_color: String,
     panel_background_color: String,
     panel_border_color: String,
     resize_handle_color: String,
+    lyrics_opacity: f32,
     preview_opacity: f32,
     config_path: PathBuf,
 }
@@ -94,6 +100,15 @@ impl AppSettings {
             .as_ref()
             .and_then(|settings| settings.use_gradient)
             .unwrap_or(false);
+        let lyric_effect = parsed
+            .as_ref()
+            .and_then(|settings| settings.lyric_effect.clone())
+            .unwrap_or_else(|| "flat".to_string());
+        let lyric_effect = if lyric_effect.eq_ignore_ascii_case("floating") {
+            "floating".to_string()
+        } else {
+            "flat".to_string()
+        };
         let font_family = parsed
             .as_ref()
             .and_then(|settings| settings.font_family.clone())
@@ -116,6 +131,11 @@ impl AppSettings {
             .as_ref()
             .and_then(|settings| settings.stroke_color.clone())
             .unwrap_or_else(|| "#081019e0".to_string());
+        let stroke_width = parsed
+            .as_ref()
+            .and_then(|settings| settings.stroke_width)
+            .unwrap_or(3.2)
+            .clamp(1.2, 6.0);
         let shadow_color = parsed
             .as_ref()
             .and_then(|settings| settings.shadow_color.clone())
@@ -132,6 +152,11 @@ impl AppSettings {
             .as_ref()
             .and_then(|settings| settings.resize_handle_color.clone())
             .unwrap_or_else(|| "#ffffffa8".to_string());
+        let lyrics_opacity = parsed
+            .as_ref()
+            .and_then(|settings| settings.lyrics_opacity)
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
         let preview_opacity = parsed
             .as_ref()
             .and_then(|settings| settings.preview_opacity)
@@ -148,15 +173,18 @@ impl AppSettings {
             cache_limit_bytes: cache_limit_mb.saturating_mul(1024 * 1024),
             show_secondary_line,
             use_gradient,
+            lyric_effect,
             font_family,
             highlight_color,
             base_color,
             preview_color,
             stroke_color,
+            stroke_width,
             shadow_color,
             panel_background_color,
             panel_border_color,
             resize_handle_color,
+            lyrics_opacity,
             preview_opacity,
             config_path,
         }
@@ -237,15 +265,18 @@ struct RenderState {
     font_scale: i32,
     show_secondary_line: bool,
     use_gradient: bool,
+    lyric_effect: String,
     font_family: String,
     highlight_color: String,
     base_color: String,
     preview_color: String,
     stroke_color: String,
+    stroke_width: f32,
     shadow_color: String,
     panel_background_color: String,
     panel_border_color: String,
     resize_handle_color: String,
+    lyrics_opacity: f32,
     preview_opacity: f32,
 }
 
@@ -718,15 +749,18 @@ fn main() -> Result<()> {
                 font_scale: preview.font_scale.unwrap_or(0),
                 show_secondary_line: settings_for_timer.show_secondary_line,
                 use_gradient: settings_for_timer.use_gradient,
+                lyric_effect: settings_for_timer.lyric_effect.clone(),
                 font_family: settings_for_timer.font_family.clone(),
                 highlight_color: settings_for_timer.highlight_color.clone(),
                 base_color: settings_for_timer.base_color.clone(),
                 preview_color: settings_for_timer.preview_color.clone(),
                 stroke_color: settings_for_timer.stroke_color.clone(),
+                stroke_width: settings_for_timer.stroke_width,
                 shadow_color: settings_for_timer.shadow_color.clone(),
                 panel_background_color: settings_for_timer.panel_background_color.clone(),
                 panel_border_color: settings_for_timer.panel_border_color.clone(),
                 resize_handle_color: settings_for_timer.resize_handle_color.clone(),
+                lyrics_opacity: settings_for_timer.lyrics_opacity,
                 preview_opacity: settings_for_timer.preview_opacity,
             });
             render.locked = preview.locked.unwrap_or(false);
@@ -737,15 +771,18 @@ fn main() -> Result<()> {
             render.font_scale = preview.font_scale.unwrap_or(0);
             render.show_secondary_line = settings_for_timer.show_secondary_line;
             render.use_gradient = settings_for_timer.use_gradient;
+            render.lyric_effect = settings_for_timer.lyric_effect.clone();
             render.font_family = settings_for_timer.font_family.clone();
             render.highlight_color = settings_for_timer.highlight_color.clone();
             render.base_color = settings_for_timer.base_color.clone();
             render.preview_color = settings_for_timer.preview_color.clone();
             render.stroke_color = settings_for_timer.stroke_color.clone();
+            render.stroke_width = settings_for_timer.stroke_width;
             render.shadow_color = settings_for_timer.shadow_color.clone();
             render.panel_background_color = settings_for_timer.panel_background_color.clone();
             render.panel_border_color = settings_for_timer.panel_border_color.clone();
             render.resize_handle_color = settings_for_timer.resize_handle_color.clone();
+            render.lyrics_opacity = settings_for_timer.lyrics_opacity;
             render.preview_opacity = settings_for_timer.preview_opacity;
             render
         } else {
@@ -804,15 +841,18 @@ fn main() -> Result<()> {
                 font_scale: preview.font_scale.unwrap_or(0),
                 show_secondary_line: settings_for_timer.show_secondary_line,
                 use_gradient: settings_for_timer.use_gradient,
+                lyric_effect: settings_for_timer.lyric_effect.clone(),
                 font_family: settings_for_timer.font_family.clone(),
                 highlight_color: settings_for_timer.highlight_color.clone(),
                 base_color: settings_for_timer.base_color.clone(),
                 preview_color: settings_for_timer.preview_color.clone(),
                 stroke_color: settings_for_timer.stroke_color.clone(),
+                stroke_width: settings_for_timer.stroke_width,
                 shadow_color: settings_for_timer.shadow_color.clone(),
                 panel_background_color: settings_for_timer.panel_background_color.clone(),
                 panel_border_color: settings_for_timer.panel_border_color.clone(),
                 resize_handle_color: settings_for_timer.resize_handle_color.clone(),
+                lyrics_opacity: settings_for_timer.lyrics_opacity,
                 preview_opacity: settings_for_timer.preview_opacity,
             }
         };
@@ -842,6 +882,7 @@ fn main() -> Result<()> {
                 let _ = component.set_property("font_scale", Value::Number(render.font_scale as f64));
                 let _ = component.set_property("show_secondary_line", Value::Bool(render.show_secondary_line));
                 let _ = component.set_property("use_gradient", Value::Bool(render.use_gradient));
+                let _ = component.set_property("lyric_effect", Value::String(render.lyric_effect.clone().into()));
                 let _ = component.set_property("lyric_font", Value::String(render.font_family.clone().into()));
                 let _ = component.set_property(
                     "highlight_color",
@@ -860,6 +901,10 @@ fn main() -> Result<()> {
                     Value::Brush(Brush::from(parse_hex_color(&render.stroke_color))),
                 );
                 let _ = component.set_property(
+                    "stroke_width",
+                    Value::Number(render.stroke_width as f64),
+                );
+                let _ = component.set_property(
                     "shadow_color",
                     Value::Brush(Brush::from(parse_hex_color(&render.shadow_color))),
                 );
@@ -874,6 +919,10 @@ fn main() -> Result<()> {
                 let _ = component.set_property(
                     "resize_handle_brush",
                     Value::Brush(Brush::from(parse_hex_color(&render.resize_handle_color))),
+                );
+                let _ = component.set_property(
+                    "lyrics_opacity",
+                    Value::Number(render.lyrics_opacity as f64),
                 );
                 let _ = component.set_property(
                     "preview_opacity",
@@ -986,10 +1035,12 @@ fn apply_preview_properties(
     );
     let _ = component.set_property("show_secondary_line", Value::Bool(true));
     let _ = component.set_property("use_gradient", Value::Bool(false));
+    let _ = component.set_property("lyric_effect", Value::String("flat".into()));
     let _ = component.set_property("highlight_color", Value::Brush(Brush::from(parse_hex_color("#00e676"))));
     let _ = component.set_property("base_color", Value::Brush(Brush::from(parse_hex_color("#f5f7fb"))));
     let _ = component.set_property("preview_color", Value::Brush(Brush::from(parse_hex_color("#f5f7fb"))));
     let _ = component.set_property("stroke_color", Value::Brush(Brush::from(parse_hex_color("#081019e0"))));
+    let _ = component.set_property("stroke_width", Value::Number(3.2));
     let _ = component.set_property("shadow_color", Value::Brush(Brush::from(parse_hex_color("#000000c4"))));
     let _ = component.set_property(
         "panel_background_brush",
@@ -1003,6 +1054,7 @@ fn apply_preview_properties(
         "resize_handle_brush",
         Value::Brush(Brush::from(parse_hex_color("#ffffffa8"))),
     );
+    let _ = component.set_property("lyrics_opacity", Value::Number(1.0));
     let _ = component.set_property("preview_opacity", Value::Number(1.0));
 }
 

@@ -65,15 +65,18 @@ export component LyricsOverlay inherits Window {
     in property <int> font_scale: 0;
     in property <bool> show_secondary_line: true;
     in property <bool> use_gradient: false;
-    in property <string> lyric_font: "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif";
+    in property <string> lyric_effect: "flat";
+    in property <string> lyric_font: "PingFang SC, SF Pro Display, HarmonyOS Sans SC, Noto Sans CJK SC, sans-serif";
     in property <brush> highlight_color: #00e676;
     in property <brush> base_color: #f5f7fb;
     in property <brush> preview_color: #f5f7fb;
     in property <brush> stroke_color: #081019e0;
+    in property <float> stroke_width: 3.2;
     in property <brush> shadow_color: #000000c4;
     in property <brush> panel_background_brush: #00000095;
     in property <brush> panel_border_brush: #ffffff28;
     in property <brush> resize_handle_brush: #ffffffa8;
+    in property <float> lyrics_opacity: 1.0;
     in property <float> preview_opacity: 1.0;
     in property <string> line_1: "";
     in property <string> line_2: "";
@@ -94,17 +97,18 @@ export component LyricsOverlay inherits Window {
     private property <length> content_bottom: 6px + button_area_h;
     private property <length> available_height: panel_height * 1px - content_top - content_bottom;
     private property <length> lyric_line_width: panel_width * 1px - content_left - content_right;
-    private property <length> primary_font_size: Math.max(18px, (locked ? 32px : 26px) + font_scale * 1px);
+    private property <length> primary_font_size: Math.max(18px, (locked ? 33px : 27px) + font_scale * 1px);
     private property <length> secondary_font_size: primary_font_size;
     private property <bool> show_second: show_secondary_line && line_2 != "";
-    private property <length> line_gap: show_second ? 8px : 0px;
+    private property <length> line_gap: show_second ? 10px : 0px;
     private property <length> active_primary_font_size: primary_font_size;
     private property <length> lyric_block_height: active_primary_font_size + (show_second ? secondary_font_size + line_gap : 0px);
     private property <length> lyric_top: (panel_height * 1px - button_area_h - lyric_block_height) / 2;
     private property <length> primary_wave_offset: 0px;
+    private property <bool> use_flat_effect: lyric_effect == "flat";
 
-    private property <brush> primary_fill_gradient: @linear-gradient(180deg, #ffffff 0%, #dff8ff 48%, #8ee8ff 100%);
-    private property <brush> primary_unplayed_fill_gradient: @linear-gradient(180deg, #ffffff 0%, #f1f5fa 52%, #d8e0e9 100%);
+    private property <brush> primary_fill_gradient: @linear-gradient(180deg, #ffffff 0%, #fbfcff 55%, #edf2f8 100%);
+    private property <brush> primary_unplayed_fill_gradient: @linear-gradient(180deg, #dde3ec 0%, #c2cbd6 100%);
     private property <brush> primary_fill: use_gradient ? primary_fill_gradient : primary_fill_solid;
     private property <brush> primary_unplayed_fill: use_gradient ? primary_unplayed_fill_gradient : primary_unplayed_fill_solid;
     private property <brush> primary_fill_solid: highlight_color;
@@ -113,8 +117,18 @@ export component LyricsOverlay inherits Window {
     private property <brush> line_2_fill: line_2_active ? primary_fill : preview_color;
     private property <brush> line_1_unplayed_fill: line_1_active ? primary_unplayed_fill : preview_color;
     private property <brush> line_2_unplayed_fill: line_2_active ? primary_unplayed_fill : preview_color;
-    private property <float> line_1_opacity: line_1_active ? 1.0 : preview_opacity;
-    private property <float> line_2_opacity: line_2_active ? 1.0 : preview_opacity;
+    private property <float> line_1_opacity: lyrics_opacity;
+    private property <float> line_2_opacity: lyrics_opacity;
+    private property <float> line_1_shadow_opacity: (line_1_active ? 0.48 : 0.24) * lyrics_opacity;
+    private property <float> line_2_shadow_opacity: (line_2_active ? 0.38 : 0.18) * lyrics_opacity;
+    private property <length> line_1_lift: use_flat_effect ? 0px : (line_1_active ? -1px : 0px);
+    private property <length> line_2_lift: use_flat_effect ? 0px : (line_2_active ? -0.5px : 0px);
+    private property <float> line_1_glow_opacity: use_flat_effect ? 0.0 : (line_1_active ? 0.10 : 0.0) * lyrics_opacity;
+    private property <float> line_2_glow_opacity: use_flat_effect ? 0.0 : (line_2_active ? 0.06 : 0.0) * lyrics_opacity;
+    private property <float> line_1_stroke_active: use_flat_effect ? stroke_width * 1.18 : stroke_width * 1.0;
+    private property <float> line_1_stroke_inactive: use_flat_effect ? stroke_width * 0.92 : stroke_width * 0.75;
+    private property <float> line_2_stroke_active: use_flat_effect ? stroke_width * 0.98 : stroke_width * 0.82;
+    private property <float> line_2_stroke_inactive: use_flat_effect ? stroke_width * 0.74 : stroke_width * 0.6;
     background: transparent;
 
     Rectangle {
@@ -169,39 +183,42 @@ export component LyricsOverlay inherits Window {
 
         Text {
             x: content_left;
-            y: lyric_top + primary_wave_offset + 2px;
+            y: lyric_top + primary_wave_offset + line_1_lift + 1px;
             width: lyric_line_width;
             text: line_1;
-            color: shadow_color;
+            color: primary_fill;
             font-family: lyric_font;
             font-size: active_primary_font_size;
-            font-weight: 800;
+            font-weight: line_1_active ? 830 : 720;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
-            opacity: line_1_opacity;
-            animate y { duration: 180ms; easing: ease-in-out; }
+            stroke: primary_fill;
+            stroke-width: line_1_active ? stroke_width * 0.62px : 0px;
+            stroke-style: outside;
+            opacity: line_1_glow_opacity;
+            animate y, opacity { duration: 260ms; easing: ease-out; }
         }
 
         Text {
             x: content_left;
-            y: lyric_top + primary_wave_offset;
+            y: lyric_top + primary_wave_offset + line_1_lift;
             width: lyric_line_width;
             text: line_1;
             color: line_1_unplayed_fill;
             font-family: lyric_font;
             font-size: active_primary_font_size;
-            font-weight: 800;
+            font-weight: line_1_active ? 830 : 720;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
             stroke: stroke_color;
-            stroke-width: 2.1px;
+            stroke-width: line_1_active ? line_1_stroke_active * 1px : line_1_stroke_inactive * 1px;
             stroke-style: outside;
             opacity: line_1_opacity;
-            animate y { duration: 180ms; easing: ease-in-out; }
+            animate y, opacity { duration: 260ms; easing: ease-out; }
         }
 
         Rectangle {
@@ -222,52 +239,55 @@ export component LyricsOverlay inherits Window {
                 color: line_1_fill;
                 font-family: lyric_font;
                 font-size: active_primary_font_size;
-                font-weight: 800;
+                font-weight: line_1_active ? 830 : 720;
                 wrap: no-wrap;
                 overflow: clip;
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 stroke: stroke_color;
-                stroke-width: 2.1px;
+                stroke-width: line_1_active ? line_1_stroke_active * 1px : line_1_stroke_inactive * 1px;
                 stroke-style: outside;
             }
         }
 
         Text {
             x: content_left;
-            y: lyric_top + active_primary_font_size + line_gap + 2px;
+            y: lyric_top + active_primary_font_size + line_gap + line_2_lift + 1px;
             width: lyric_line_width;
             text: line_2;
-            color: shadow_color;
+            color: primary_fill;
             font-family: lyric_font;
             font-size: secondary_font_size;
-            font-weight: 720;
+            font-weight: line_2_active ? 810 : 670;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
-            opacity: show_second ? line_2_opacity : 0;
-            animate y, opacity { duration: 180ms; easing: ease-in-out; }
+            stroke: primary_fill;
+            stroke-width: line_2_active ? stroke_width * 0.5px : 0px;
+            stroke-style: outside;
+            opacity: show_second ? line_2_glow_opacity : 0;
+            animate y, opacity { duration: 260ms; easing: ease-out; }
         }
 
         Text {
             x: content_left;
-            y: lyric_top + active_primary_font_size + line_gap;
+            y: lyric_top + active_primary_font_size + line_gap + line_2_lift;
             width: lyric_line_width;
             text: line_2;
             color: line_2_unplayed_fill;
             font-family: lyric_font;
             font-size: secondary_font_size;
-            font-weight: 720;
+            font-weight: line_2_active ? 810 : 670;
             wrap: no-wrap;
             overflow: clip;
             horizontal-alignment: center;
             vertical-alignment: center;
             stroke: stroke_color;
-            stroke-width: 1.8px;
+            stroke-width: line_2_active ? line_2_stroke_active * 1px : line_2_stroke_inactive * 1px;
             stroke-style: outside;
             opacity: show_second ? line_2_opacity : 0;
-            animate y, opacity { duration: 180ms; easing: ease-in-out; }
+            animate y, opacity { duration: 260ms; easing: ease-out; }
         }
 
         Rectangle {
@@ -289,13 +309,13 @@ export component LyricsOverlay inherits Window {
                 color: line_2_fill;
                 font-family: lyric_font;
                 font-size: secondary_font_size;
-                font-weight: 720;
+                font-weight: line_2_active ? 810 : 670;
                 wrap: no-wrap;
                 overflow: clip;
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 stroke: stroke_color;
-                stroke-width: 1.8px;
+                stroke-width: line_2_active ? line_2_stroke_active * 1px : line_2_stroke_inactive * 1px;
                 stroke-style: outside;
             }
         }

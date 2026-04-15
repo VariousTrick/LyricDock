@@ -34,31 +34,43 @@ show_secondary_line = true
 #   关闭后使用纯色，默认关闭。
 use_gradient = false
 
+# `lyric_effect`:
+#   歌词效果风格：
+#   - "flat": 平面风格，整体全描边（推荐亮色背景）
+#   - "floating": 轻微浮动和边缘高亮
+lyric_effect = "flat"
+
 # `font_family`:
 #   歌词字体族。可以写多个字体，按顺序回退。
 font_family = "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif"
 
 # `highlight_color`:
-#   当前正在推进的歌词颜色。
-#   建议使用饱和度较高的纯色，例如绿色、青色、红色。
-highlight_color = "#00FF00"
+#   当前高亮进度颜色（主歌词已播放部分）。
+#   不想用白色时，直接改这里。
+highlight_color = "#00e676"
 
 # `base_color`:
-#   当前歌词未推进部分的基础颜色。
-base_color = "#f5f7fb"
+#   当前主歌词未播放部分颜色。
+base_color = "#d0d7e2"
 
 # `preview_color`:
 #   另一行“预告句”的颜色。
-#   如果你不想让预告句发灰，可以让它和 `base_color` 一样。
+#   如果你不想让预告句发灰，可以调亮这个颜色。
 preview_color = "#f5f7fb"
 
 # `stroke_color`:
 #   歌词描边颜色，建议保留深色。
-stroke_color = "#081019e0"
+stroke_color = "#000000"
 
-# `shadow_color`:
-#   歌词投影颜色。
-shadow_color = "#000000c4"
+# `stroke_width`:
+#   歌词描边粗细，建议范围 1.2 到 6.0。
+#   值越大，亮色背景可读性越强；推荐先从 3.2 调到 4.2 试试。
+stroke_width = 1
+
+# `lyrics_opacity`:
+#   歌词整体透明度，范围 0.0 到 1.0。
+#   1.0 表示完全不透明（推荐，最清晰）。
+lyrics_opacity = 1.0
 
 # `panel_background_color`:
 #   解锁态面板背景色。
@@ -73,7 +85,3 @@ panel_border_color = "#ffffffa1"
 #   解锁态右下角缩放点颜色。
 resize_handle_color = "#ffffffa8"
 
-# `preview_opacity`:
-#   预告句透明度，范围 0.0 到 1.0。
-#   如果你希望两行几乎一样亮，可以设成 1.0。
-preview_opacity = 1.0
