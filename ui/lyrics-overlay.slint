@@ -49,6 +49,90 @@ component ToolbarIconButton inherits Rectangle {
     }
 }
 
+export struct KaraokeSegment {
+    text: string,
+    progress: float,
+}
+
+component KaraokeLine inherits Rectangle {
+    in property <[KaraokeSegment]> segments;
+    in property <length> font_size;
+    in property <string> font_family;
+    in property <brush> played_fill;
+    in property <brush> unplayed_fill;
+    in property <brush> stroke_color;
+    in property <float> stroke_width;
+    in property <int> font_weight: 800;
+    in property <float> opacity_value: 1.0;
+
+    background: #00000000;
+    width: max(1px, row.preferred-width);
+    height: font_size + 10px;
+    opacity: opacity_value;
+
+    row := HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        spacing: 0px;
+
+        for segment[index] in root.segments : Rectangle {
+            background: #00000000;
+            private property <length> segment_width: max(base_text.preferred-width, 1px);
+            private property <length> segment_height: root.height;
+            min-width: segment_width;
+            preferred-width: segment_width;
+            height: segment_height;
+
+            base_text := Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                text: segment.text;
+                color: root.unplayed_fill;
+                font-family: root.font_family;
+                font-size: root.font_size;
+                font-weight: root.font_weight;
+                wrap: no-wrap;
+                overflow: clip;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                stroke: root.stroke_color;
+                stroke-width: root.stroke_width * 1px;
+                stroke-style: outside;
+            }
+
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width * Math.max(0.0, Math.min(segment.progress, 1.0));
+                height: parent.height;
+                clip: true;
+                background: #00000000;
+
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: segment_width;
+                    height: segment_height;
+                    text: segment.text;
+                    color: root.played_fill;
+                    font-family: root.font_family;
+                    font-size: root.font_size;
+                    font-weight: root.font_weight;
+                    wrap: no-wrap;
+                    overflow: clip;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    stroke: root.stroke_color;
+                    stroke-width: root.stroke_width * 1px;
+                    stroke-style: outside;
+                }
+            }
+        }
+    }
+}
+
 export component LyricsOverlay inherits Window {
     callback request-lock();
     callback request-font-step(step: int);
@@ -80,6 +164,8 @@ export component LyricsOverlay inherits Window {
     in property <float> preview_opacity: 1.0;
     in property <string> line_1: "";
     in property <string> line_2: "";
+    in property <[KaraokeSegment]> line_1_segments: [];
+    in property <[KaraokeSegment]> line_2_segments: [];
     in property <float> progress_1: 0.0;
     in property <float> progress_2: 0.0;
     in property <bool> line_1_active: true;
@@ -181,143 +267,34 @@ export component LyricsOverlay inherits Window {
             }
         }
 
-        Text {
-            x: content_left;
-            y: lyric_top + primary_wave_offset + line_1_lift + 1px;
-            width: lyric_line_width;
-            text: line_1;
-            color: primary_fill;
-            font-family: lyric_font;
-            font-size: active_primary_font_size;
-            font-weight: line_1_active ? 830 : 720;
-            wrap: no-wrap;
-            overflow: clip;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            stroke: primary_fill;
-            stroke-width: line_1_active ? stroke_width * 0.62px : 0px;
-            stroke-style: outside;
-            opacity: line_1_glow_opacity;
-            animate y, opacity { duration: 260ms; easing: ease-out; }
-        }
-
-        Text {
-            x: content_left;
+        KaraokeLine {
+            x: (parent.width - self.width) / 2;
             y: lyric_top + primary_wave_offset + line_1_lift;
-            width: lyric_line_width;
-            text: line_1;
-            color: line_1_unplayed_fill;
-            font-family: lyric_font;
-            font-size: active_primary_font_size;
-            font-weight: line_1_active ? 830 : 720;
-            wrap: no-wrap;
-            overflow: clip;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            stroke: stroke_color;
-            stroke-width: line_1_active ? line_1_stroke_active * 1px : line_1_stroke_inactive * 1px;
-            stroke-style: outside;
-            opacity: line_1_opacity;
-            animate y, opacity { duration: 260ms; easing: ease-out; }
+            segments: line_1_segments;
+            font_size: active_primary_font_size;
+            font_family: lyric_font;
+            played_fill: line_1_fill;
+            unplayed_fill: line_1_unplayed_fill;
+            stroke_color: stroke_color;
+            stroke_width: line_1_active ? line_1_stroke_active : line_1_stroke_inactive;
+            font_weight: line_1_active ? 830 : 720;
+            opacity_value: line_1_opacity;
+            animate y, opacity_value { duration: 260ms; easing: ease-out; }
         }
 
-        Rectangle {
-            x: content_left;
-            y: lyric_top - 3px;
-            width: lyric_line_width * Math.max(0.0, Math.min(progress_1, 1.0));
-            height: active_primary_font_size + 12px;
-            clip: true;
-            background: #00000000;
-            border-radius: 3px;
-            animate y { duration: 180ms; easing: ease-in-out; }
-
-            Text {
-                x: 0px;
-                y: 3px;
-                width: lyric_line_width;
-                text: line_1;
-                color: line_1_fill;
-                font-family: lyric_font;
-                font-size: active_primary_font_size;
-                font-weight: line_1_active ? 830 : 720;
-                wrap: no-wrap;
-                overflow: clip;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                stroke: stroke_color;
-                stroke-width: line_1_active ? line_1_stroke_active * 1px : line_1_stroke_inactive * 1px;
-                stroke-style: outside;
-            }
-        }
-
-        Text {
-            x: content_left;
-            y: lyric_top + active_primary_font_size + line_gap + line_2_lift + 1px;
-            width: lyric_line_width;
-            text: line_2;
-            color: primary_fill;
-            font-family: lyric_font;
-            font-size: secondary_font_size;
-            font-weight: line_2_active ? 810 : 670;
-            wrap: no-wrap;
-            overflow: clip;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            stroke: primary_fill;
-            stroke-width: line_2_active ? stroke_width * 0.5px : 0px;
-            stroke-style: outside;
-            opacity: show_second ? line_2_glow_opacity : 0;
-            animate y, opacity { duration: 260ms; easing: ease-out; }
-        }
-
-        Text {
-            x: content_left;
+        KaraokeLine {
+            x: (parent.width - self.width) / 2;
             y: lyric_top + active_primary_font_size + line_gap + line_2_lift;
-            width: lyric_line_width;
-            text: line_2;
-            color: line_2_unplayed_fill;
-            font-family: lyric_font;
-            font-size: secondary_font_size;
-            font-weight: line_2_active ? 810 : 670;
-            wrap: no-wrap;
-            overflow: clip;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            stroke: stroke_color;
-            stroke-width: line_2_active ? line_2_stroke_active * 1px : line_2_stroke_inactive * 1px;
-            stroke-style: outside;
-            opacity: show_second ? line_2_opacity : 0;
-            animate y, opacity { duration: 260ms; easing: ease-out; }
-        }
-
-        Rectangle {
-            x: content_left;
-            y: lyric_top + active_primary_font_size + line_gap - 3px;
-            width: lyric_line_width * Math.max(0.0, Math.min(progress_2, 1.0));
-            height: secondary_font_size + 12px;
-            clip: true;
-            background: #00000000;
-            border-radius: 2px;
-            opacity: show_second ? line_2_opacity : 0;
-            animate y, opacity { duration: 180ms; easing: ease-in-out; }
-
-            Text {
-                x: 0px;
-                y: 3px;
-                width: lyric_line_width;
-                text: line_2;
-                color: line_2_fill;
-                font-family: lyric_font;
-                font-size: secondary_font_size;
-                font-weight: line_2_active ? 810 : 670;
-                wrap: no-wrap;
-                overflow: clip;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                stroke: stroke_color;
-                stroke-width: line_2_active ? line_2_stroke_active * 1px : line_2_stroke_inactive * 1px;
-                stroke-style: outside;
-            }
+            segments: line_2_segments;
+            font_size: secondary_font_size;
+            font_family: lyric_font;
+            played_fill: line_2_fill;
+            unplayed_fill: line_2_unplayed_fill;
+            stroke_color: stroke_color;
+            stroke_width: line_2_active ? line_2_stroke_active : line_2_stroke_inactive;
+            font_weight: line_2_active ? 810 : 670;
+            opacity_value: show_second ? line_2_opacity : 0;
+            animate y, opacity_value { duration: 260ms; easing: ease-out; }
         }
 
         if !locked : Rectangle {

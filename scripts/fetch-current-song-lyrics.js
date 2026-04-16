@@ -4,6 +4,31 @@ const { execFileSync } = require('child_process');
 const crypto = require('crypto');
 const netease = require('NeteaseCloudMusicApi');
 
+function readTrackFromEnv() {
+  const raw = process.env.LYRICDOCK_TRACK_JSON;
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.title === 'string' &&
+      Array.isArray(parsed.artists) &&
+      parsed.artists.length > 0
+    ) {
+      return {
+        title: parsed.title,
+        album: typeof parsed.album === 'string' ? parsed.album : '',
+        artists: parsed.artists.map((item) => String(item)).filter(Boolean),
+        durationMs: Number(parsed.duration_ms ?? parsed.durationMs ?? 0),
+      };
+    }
+  } catch (_) {
+  }
+
+  return null;
+}
+
 function readSpotifyMetadata() {
   const output = execFileSync(
     'gdbus',
@@ -132,7 +157,7 @@ async function withRetry(fn, attempts = 3) {
 }
 
 async function main() {
-  const track = readSpotifyMetadata();
+  const track = readTrackFromEnv() || readSpotifyMetadata();
   const query = `${normalizeForMatch(track.title)} ${normalizeForMatch(track.artists[0])}`;
   const search = await withRetry(() =>
     netease.search({ keywords: query, limit: 30, type: 1 })

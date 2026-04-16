@@ -1,10 +1,20 @@
+mod lyrics;
+mod mpris;
+mod settings;
+
+use crate::lyrics::parser::{line_progress, parse_lrc, parse_yrc, LyricLine};
+use crate::mpris::{MprisClient, TrackInfo};
+use crate::settings::{
+    ensure_preview_file, read_preview_data, resolve_window_state_path, write_preview_data,
+    AppSettings, PreviewData,
+};
 use ksni::blocking::TrayMethods;
 use layer_shika_adapters::SurfaceState;
 use layer_shika::calloop::TimeoutAction;
 use layer_shika::prelude::*;
-use layer_shika::slint::{Brush, Color, SharedString};
-use layer_shika::slint_interpreter::Value;
-use serde::{Deserialize, Serialize};
+use layer_shika::slint::{Brush, Color, ModelRc, SharedString, VecModel};
+use layer_shika::slint_interpreter::{Struct, Value};
+use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -18,226 +28,12 @@ use unicode_width::UnicodeWidthStr;
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{wl_compositor, wl_region, wl_registry, wl_surface};
 use wayland_client::{delegate_noop, Connection as WlConnection, Dispatch, QueueHandle};
-use zbus::blocking::{Connection as DBusConnection, Proxy as DBusProxy};
-use zvariant::OwnedValue;
 
 const SURFACE_NAME: &str = "LyricsOverlay";
-const PREVIEW_FILE: &str = "调试面板.json";
+const WINDOW_STATE_FILE: &str = "窗口状态.json";
+const LEGACY_PREVIEW_FILE: &str = "调试面板.json";
 const SETTINGS_FILE: &str = "配置.toml";
 const LEGACY_LYRICS_DIR: &str = "lyrics-cache";
-
-#[derive(Debug, Clone, Deserialize)]
-struct AppSettingsFile {
-    lyrics_dir: Option<String>,
-    cache_limit_mb: Option<u64>,
-    show_secondary_line: Option<bool>,
-    use_gradient: Option<bool>,
-    lyric_effect: Option<String>,
-    font_family: Option<String>,
-    highlight_color: Option<String>,
-    base_color: Option<String>,
-    preview_color: Option<String>,
-    stroke_color: Option<String>,
-    stroke_width: Option<f32>,
-    shadow_color: Option<String>,
-    panel_background_color: Option<String>,
-    panel_border_color: Option<String>,
-    resize_handle_color: Option<String>,
-    lyrics_opacity: Option<f32>,
-    preview_opacity: Option<f32>,
-}
-
-#[derive(Debug, Clone)]
-struct AppSettings {
-    lyrics_root: PathBuf,
-    imported_dir: PathBuf,
-    cache_dir: PathBuf,
-    cache_limit_bytes: u64,
-    show_secondary_line: bool,
-    use_gradient: bool,
-    lyric_effect: String,
-    font_family: String,
-    highlight_color: String,
-    base_color: String,
-    preview_color: String,
-    stroke_color: String,
-    stroke_width: f32,
-    shadow_color: String,
-    panel_background_color: String,
-    panel_border_color: String,
-    resize_handle_color: String,
-    lyrics_opacity: f32,
-    preview_opacity: f32,
-    config_path: PathBuf,
-}
-
-impl AppSettings {
-    fn from_file(config_path: PathBuf) -> Self {
-        ensure_settings_file(&config_path);
-        let parsed = fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|content| toml::from_str::<AppSettingsFile>(&content).ok());
-        let base_dir = config_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        let lyrics_dir = parsed
-            .as_ref()
-            .and_then(|settings| settings.lyrics_dir.as_deref())
-            .unwrap_or("./歌词数据");
-        let lyrics_root = resolve_config_path(&base_dir, lyrics_dir);
-        let imported_dir = lyrics_root.join("导入歌词");
-        let cache_dir = lyrics_root.join("缓存歌词");
-        let cache_limit_mb = parsed
-            .as_ref()
-            .and_then(|settings| settings.cache_limit_mb)
-            .unwrap_or(256);
-        let show_secondary_line = parsed
-            .as_ref()
-            .and_then(|settings| settings.show_secondary_line)
-            .unwrap_or(true);
-        let use_gradient = parsed
-            .as_ref()
-            .and_then(|settings| settings.use_gradient)
-            .unwrap_or(false);
-        let lyric_effect = parsed
-            .as_ref()
-            .and_then(|settings| settings.lyric_effect.clone())
-            .unwrap_or_else(|| "flat".to_string());
-        let lyric_effect = if lyric_effect.eq_ignore_ascii_case("floating") {
-            "floating".to_string()
-        } else {
-            "flat".to_string()
-        };
-        let font_family = parsed
-            .as_ref()
-            .and_then(|settings| settings.font_family.clone())
-            .unwrap_or_else(|| {
-                "Noto Sans CJK SC, Source Han Sans SC, Noto Sans, sans-serif".to_string()
-            });
-        let highlight_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.highlight_color.clone())
-            .unwrap_or_else(|| "#00e676".to_string());
-        let base_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.base_color.clone())
-            .unwrap_or_else(|| "#f5f7fb".to_string());
-        let preview_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.preview_color.clone())
-            .unwrap_or_else(|| "#f5f7fb".to_string());
-        let stroke_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.stroke_color.clone())
-            .unwrap_or_else(|| "#081019e0".to_string());
-        let stroke_width = parsed
-            .as_ref()
-            .and_then(|settings| settings.stroke_width)
-            .unwrap_or(3.2)
-            .clamp(1.2, 6.0);
-        let shadow_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.shadow_color.clone())
-            .unwrap_or_else(|| "#000000c4".to_string());
-        let panel_background_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.panel_background_color.clone())
-            .unwrap_or_else(|| "#00000095".to_string());
-        let panel_border_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.panel_border_color.clone())
-            .unwrap_or_else(|| "#ffffff28".to_string());
-        let resize_handle_color = parsed
-            .as_ref()
-            .and_then(|settings| settings.resize_handle_color.clone())
-            .unwrap_or_else(|| "#ffffffa8".to_string());
-        let lyrics_opacity = parsed
-            .as_ref()
-            .and_then(|settings| settings.lyrics_opacity)
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
-        let preview_opacity = parsed
-            .as_ref()
-            .and_then(|settings| settings.preview_opacity)
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
-
-        let _ = fs::create_dir_all(&imported_dir);
-        let _ = fs::create_dir_all(&cache_dir);
-
-        Self {
-            lyrics_root,
-            imported_dir,
-            cache_dir,
-            cache_limit_bytes: cache_limit_mb.saturating_mul(1024 * 1024),
-            show_secondary_line,
-            use_gradient,
-            lyric_effect,
-            font_family,
-            highlight_color,
-            base_color,
-            preview_color,
-            stroke_color,
-            stroke_width,
-            shadow_color,
-            panel_background_color,
-            panel_border_color,
-            resize_handle_color,
-            lyrics_opacity,
-            preview_opacity,
-            config_path,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-struct PreviewData {
-    locked: Option<bool>,
-    panel_width: Option<u32>,
-    panel_height: Option<u32>,
-    panel_x: Option<i32>,
-    panel_y: Option<i32>,
-    font_scale: Option<i32>,
-}
-
-impl Default for PreviewData {
-    fn default() -> Self {
-        Self {
-            locked: Some(false),
-            panel_width: Some(640),
-            panel_height: Some(112),
-            panel_x: Some(36),
-            panel_y: Some(24),
-            font_scale: Some(0),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TrackInfo {
-    title: String,
-    album: String,
-    artists: Vec<String>,
-    duration_ms: u64,
-    position_ms: u64,
-    playback_status: String,
-}
-
-#[derive(Debug, Clone)]
-struct LyricLine {
-    time_ms: u64,
-    end_time_ms: u64,
-    text: String,
-    segments: Vec<LyricSegment>,
-}
-
-#[derive(Debug, Clone)]
-struct LyricSegment {
-    start_time_ms: u64,
-    end_time_ms: u64,
-    text: String,
-}
 
 #[derive(Debug, Clone)]
 struct ActiveLyrics {
@@ -254,6 +50,8 @@ struct RenderState {
     y: i32,
     line_1: String,
     line_2: String,
+    line_1_segments: Vec<LyricRenderSegment>,
+    line_2_segments: Vec<LyricRenderSegment>,
     progress_1: f32,
     progress_2: f32,
     line_1_active: bool,
@@ -284,10 +82,18 @@ struct RenderState {
 struct LyricRenderPair {
     line_1: String,
     line_2: String,
+    line_1_segments: Vec<LyricRenderSegment>,
+    line_2_segments: Vec<LyricRenderSegment>,
     progress_1: f32,
     progress_2: f32,
     line_1_active: bool,
     line_2_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LyricRenderSegment {
+    text: String,
+    progress: f32,
 }
 
 #[derive(Debug, Default)]
@@ -314,57 +120,6 @@ struct RuntimeState {
     passthrough: Option<WaylandPassthrough>,
 }
 
-#[derive(Debug)]
-struct MprisClient {
-    connection: DBusConnection,
-}
-
-impl MprisClient {
-    fn new() -> Option<Self> {
-        DBusConnection::session().ok().map(|connection| Self { connection })
-    }
-
-    fn read_track(&self) -> Option<TrackInfo> {
-        let proxy = DBusProxy::new(
-            &self.connection,
-            "org.mpris.MediaPlayer2.spotify",
-            "/org/mpris/MediaPlayer2",
-            "org.mpris.MediaPlayer2.Player",
-        )
-        .ok()?;
-
-        let metadata: HashMap<String, OwnedValue> = proxy.get_property("Metadata").ok()?;
-        let title = metadata
-            .get("xesam:title")
-            .and_then(|value| String::try_from(value.clone()).ok())?;
-        let album = metadata
-            .get("xesam:album")
-            .and_then(|value| String::try_from(value.clone()).ok())
-            .unwrap_or_default();
-        let artists = metadata
-            .get("xesam:artist")
-            .and_then(|value| Vec::<String>::try_from(value.clone()).ok())
-            .filter(|items| !items.is_empty())?;
-        let duration_us = metadata
-            .get("mpris:length")
-            .and_then(|value| u64::try_from(value.clone()).ok())
-            .unwrap_or(0);
-        let position_us: i64 = proxy.get_property("Position").ok().unwrap_or(0);
-        let playback_status: String = proxy
-            .get_property("PlaybackStatus")
-            .ok()
-            .unwrap_or_else(|| "Stopped".into());
-
-        Some(TrackInfo {
-            title,
-            album,
-            artists,
-            duration_ms: duration_us / 1_000,
-            position_ms: position_us.max(0) as u64 / 1_000,
-            playback_status,
-        })
-    }
-}
 
 #[derive(Debug)]
 struct LyricDockTray {
@@ -530,7 +285,7 @@ impl WaylandPassthrough {
 
 fn main() -> Result<()> {
     let settings = AppSettings::from_file(Path::new(SETTINGS_FILE).to_path_buf());
-    let preview_path = Path::new(PREVIEW_FILE).to_path_buf();
+    let preview_path = resolve_window_state_path(WINDOW_STATE_FILE, LEGACY_PREVIEW_FILE);
     ensure_preview_file(&preview_path);
     let initial_preview = read_preview_data(&preview_path);
     let shared_preview = Rc::new(RefCell::new(initial_preview.clone()));
@@ -738,6 +493,8 @@ fn main() -> Result<()> {
                 y: preview.panel_y.unwrap_or(24).max(0),
                 line_1: String::new(),
                 line_2: String::new(),
+                line_1_segments: Vec::new(),
+                line_2_segments: Vec::new(),
                 progress_1: 1.0,
                 progress_2: 0.0,
                 line_1_active: true,
@@ -830,6 +587,8 @@ fn main() -> Result<()> {
                 y: preview.panel_y.unwrap_or(24).max(0),
                 line_1: lyric_pair.line_1,
                 line_2: lyric_pair.line_2,
+                line_1_segments: lyric_pair.line_1_segments,
+                line_2_segments: lyric_pair.line_2_segments,
                 progress_1: lyric_pair.progress_1,
                 progress_2: lyric_pair.progress_2,
                 line_1_active: lyric_pair.line_1_active,
@@ -871,6 +630,8 @@ fn main() -> Result<()> {
                 let _ = component.set_property("panel_height", Value::Number(render.height as f64));
                 let _ = component.set_property("line_1", shared(Some(&render.line_1)));
                 let _ = component.set_property("line_2", shared(Some(&render.line_2)));
+                let _ = component.set_property("line_1_segments", build_segment_model(&render.line_1_segments));
+                let _ = component.set_property("line_2_segments", build_segment_model(&render.line_2_segments));
                 let _ = component.set_property("progress_1", Value::Number(render.progress_1 as f64));
                 let _ = component.set_property("progress_2", Value::Number(render.progress_2 as f64));
                 let _ = component.set_property("line_1_active", Value::Bool(render.line_1_active));
@@ -993,22 +754,6 @@ fn main() -> Result<()> {
     shell.run()
 }
 
-fn read_preview_data(path: &Path) -> PreviewData {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<PreviewData>(&content).ok())
-        .unwrap_or_default()
-}
-
-fn ensure_preview_file(path: &Path) {
-    if path.exists() {
-        return;
-    }
-
-    let preview = PreviewData::default();
-    write_preview_data(path, &preview);
-}
-
 fn apply_preview_properties(
     component: &layer_shika::slint_interpreter::ComponentInstance,
     preview: &PreviewData,
@@ -1056,6 +801,21 @@ fn apply_preview_properties(
     );
     let _ = component.set_property("lyrics_opacity", Value::Number(1.0));
     let _ = component.set_property("preview_opacity", Value::Number(1.0));
+    let _ = component.set_property("line_1_segments", build_segment_model(&[]));
+    let _ = component.set_property("line_2_segments", build_segment_model(&[]));
+}
+
+fn build_segment_model(segments: &[LyricRenderSegment]) -> Value {
+    let rows: Vec<Value> = segments
+        .iter()
+        .map(|segment| {
+            Value::Struct(Struct::from_iter([
+                ("text".to_string(), Value::String(segment.text.clone().into())),
+                ("progress".to_string(), Value::Number(segment.progress as f64)),
+            ]))
+        })
+        .collect();
+    Value::Model(ModelRc::new(VecModel::from(rows)))
 }
 
 fn current_lines_for_track(
@@ -1069,6 +829,11 @@ fn current_lines_for_track(
         return LyricRenderPair {
             line_1: "正在等待 Spotify...".into(),
             line_2: "".into(),
+            line_1_segments: vec![LyricRenderSegment {
+                text: "正在等待 Spotify...".into(),
+                progress: 1.0,
+            }],
+            line_2_segments: Vec::new(),
             progress_1: 1.0,
             progress_2: 0.0,
             line_1_active: true,
@@ -1099,6 +864,11 @@ fn current_lines_for_track(
     LyricRenderPair {
         line_1: format!("{} - {}", artist, track.title),
         line_2: "".into(),
+        line_1_segments: vec![LyricRenderSegment {
+            text: format!("{} - {}", artist, track.title),
+            progress: 1.0,
+        }],
+        line_2_segments: Vec::new(),
         progress_1: 1.0,
         progress_2: 0.0,
         line_1_active: true,
@@ -1132,11 +902,15 @@ fn load_or_fetch_lyrics(
         .unwrap_or(true);
 
     if should_fetch {
-        let _ = Command::new("node")
+        let mut command = Command::new("node");
+        command
             .arg(fetch_script)
             .env("LYRICDOCK_CACHE_DIR", &settings.cache_dir)
-            .current_dir(Path::new("."))
-            .status();
+            .current_dir(Path::new("."));
+        if let Ok(track_json) = serde_json::to_string(track) {
+            command.env("LYRICDOCK_TRACK_JSON", track_json);
+        }
+        let _ = command.status();
         runtime.last_fetch_attempt = Some((key.clone(), Instant::now()));
         enforce_cache_limit(&settings.cache_dir, settings.cache_limit_bytes);
     }
@@ -1224,162 +998,6 @@ fn read_lyric_file(path: &Path) -> Option<Vec<LyricLine>> {
     (!lines.is_empty()).then_some(lines)
 }
 
-fn parse_lrc(content: &str) -> Vec<LyricLine> {
-    let mut parsed = Vec::new();
-
-    for raw_line in content.lines() {
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let mut rest = trimmed;
-        let mut times = Vec::new();
-        while let Some(stripped) = rest.strip_prefix('[') {
-            let Some(end) = stripped.find(']') else {
-                break;
-            };
-            let tag = &stripped[..end];
-            if let Some(ms) = parse_timestamp(tag) {
-                times.push(ms);
-                rest = &stripped[end + 1..];
-            } else {
-                break;
-            }
-        }
-
-        let text = rest.trim();
-        if times.is_empty() || text.is_empty() || is_credit_line(text) {
-            continue;
-        }
-
-        for time_ms in times {
-            parsed.push(LyricLine {
-                time_ms,
-                end_time_ms: time_ms,
-                text: text.to_string(),
-                segments: Vec::new(),
-            });
-        }
-    }
-
-    parsed.sort_by_key(|line| line.time_ms);
-    for idx in 0..parsed.len() {
-        let default_end = parsed[idx].time_ms.saturating_add(4_000);
-        let next_start = parsed.get(idx + 1).map(|line| line.time_ms).unwrap_or(default_end);
-        parsed[idx].end_time_ms = next_start.max(parsed[idx].time_ms.saturating_add(500));
-    }
-    parsed
-}
-
-fn parse_yrc(content: &str) -> Vec<LyricLine> {
-    let mut parsed = Vec::new();
-
-    for raw_line in content.lines() {
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('{') || !trimmed.starts_with('[') {
-            continue;
-        }
-
-        let Some(header_end) = trimmed.find(']') else {
-            continue;
-        };
-        let header = &trimmed[1..header_end];
-        let mut header_parts = header.split(',');
-        let Some(start_ms) = header_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
-            continue;
-        };
-        let Some(duration_ms) = header_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
-            continue;
-        };
-
-        let mut rest = &trimmed[header_end + 1..];
-        let mut segments = Vec::new();
-
-        while let Some(segment_start_index) = rest.find('(') {
-            if segment_start_index > 0 {
-                rest = &rest[segment_start_index..];
-            }
-            let Some(segment_end_index) = rest.find(')') else {
-                break;
-            };
-            let segment_meta = &rest[1..segment_end_index];
-            let mut meta_parts = segment_meta.split(',');
-            let Some(seg_start) = meta_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
-                break;
-            };
-            let Some(seg_duration_cs) = meta_parts.next().and_then(|value| value.parse::<u64>().ok()) else {
-                break;
-            };
-
-            let after_meta = &rest[segment_end_index + 1..];
-            let next_segment_index = after_meta.find('(').unwrap_or(after_meta.len());
-            let segment_text = after_meta[..next_segment_index].to_string();
-
-            if !segment_text.trim().is_empty() {
-                let seg_duration_ms = seg_duration_cs;
-                segments.push(LyricSegment {
-                    start_time_ms: seg_start,
-                    end_time_ms: seg_start.saturating_add(seg_duration_ms.max(1)),
-                    text: segment_text,
-                });
-            }
-
-            rest = &after_meta[next_segment_index..];
-        }
-
-        if segments.is_empty() {
-            continue;
-        }
-
-        let text = segments
-            .iter()
-            .map(|segment| segment.text.as_str())
-            .collect::<String>()
-            .trim()
-            .to_string();
-        if text.is_empty() || is_credit_line(&text) {
-            continue;
-        }
-
-        parsed.push(LyricLine {
-            time_ms: start_ms,
-            end_time_ms: start_ms.saturating_add(duration_ms.max(1)),
-            text,
-            segments,
-        });
-    }
-
-    parsed.sort_by_key(|line| line.time_ms);
-    for idx in 0..parsed.len() {
-        let default_end = parsed[idx].end_time_ms.max(parsed[idx].time_ms.saturating_add(500));
-        let next_start = parsed.get(idx + 1).map(|line| line.time_ms).unwrap_or(default_end);
-        parsed[idx].end_time_ms = next_start.max(parsed[idx].time_ms.saturating_add(500));
-    }
-    parsed
-}
-
-fn parse_timestamp(tag: &str) -> Option<u64> {
-    let mut parts = tag.split(':');
-    let minutes = parts.next()?.parse::<u64>().ok()?;
-    let seconds_part = parts.next()?;
-    if parts.next().is_some() {
-        return None;
-    }
-
-    let mut seconds_split = seconds_part.split('.');
-    let seconds = seconds_split.next()?.parse::<u64>().ok()?;
-    let millis_text = seconds_split.next().unwrap_or("0");
-    let millis = match millis_text.len() {
-        0 => 0,
-        1 => millis_text.parse::<u64>().ok()? * 100,
-        2 => millis_text.parse::<u64>().ok()? * 10,
-        _ => millis_text.get(..3)?.parse::<u64>().ok()?,
-    };
-
-    Some(minutes * 60_000 + seconds * 1_000 + millis)
-}
-
 fn parse_hex_color(input: &str) -> Color {
     let text = input.trim().trim_start_matches('#');
     let bytes = match text.len() {
@@ -1441,6 +1059,11 @@ fn lyric_pair_for_position(
         return LyricRenderPair {
             line_1: "未找到歌词".into(),
             line_2: "".into(),
+            line_1_segments: vec![LyricRenderSegment {
+                text: "未找到歌词".into(),
+                progress: 1.0,
+            }],
+            line_2_segments: Vec::new(),
             progress_1: 1.0,
             progress_2: 0.0,
             line_1_active: true,
@@ -1461,6 +1084,8 @@ fn lyric_pair_for_position(
         return LyricRenderPair {
             line_1: current,
             line_2: "".into(),
+            line_1_segments: build_render_segments(lines.get(current_index), position_ms, true),
+            line_2_segments: Vec::new(),
             progress_1,
             progress_2: 0.0,
             line_1_active: true,
@@ -1474,6 +1099,8 @@ fn lyric_pair_for_position(
         return LyricRenderPair {
             line_1: current.map(|line| line.text.clone()).unwrap_or_default(),
             line_2: next.map(|line| line.text.clone()).unwrap_or_default(),
+            line_1_segments: build_render_segments(current, position_ms, true),
+            line_2_segments: build_render_segments(next, position_ms, false),
             progress_1: current
                 .map(|line| line_progress(line, position_ms))
                 .unwrap_or(0.0),
@@ -1488,6 +1115,8 @@ fn lyric_pair_for_position(
     LyricRenderPair {
         line_1: upcoming.map(|line| line.text.clone()).unwrap_or_default(),
         line_2: current.map(|line| line.text.clone()).unwrap_or_default(),
+        line_1_segments: build_render_segments(upcoming, position_ms, false),
+        line_2_segments: build_render_segments(current, position_ms, true),
         progress_1: 0.0,
         progress_2: current
             .map(|line| line_progress(line, position_ms))
@@ -1495,6 +1124,51 @@ fn lyric_pair_for_position(
         line_1_active: false,
         line_2_active: current.is_some(),
     }
+}
+
+fn build_render_segments(
+    line: Option<&LyricLine>,
+    position_ms: u64,
+    active: bool,
+) -> Vec<LyricRenderSegment> {
+    let Some(line) = line else {
+        return Vec::new();
+    };
+
+    if line.segments.is_empty() {
+        return vec![LyricRenderSegment {
+            text: line.text.clone(),
+            progress: if active {
+                line_progress(line, position_ms)
+            } else {
+                0.0
+            },
+        }];
+    }
+
+    line.segments
+        .iter()
+        .map(|segment| {
+            let progress = if !active {
+                0.0
+            } else if position_ms >= segment.end_time_ms {
+                1.0
+            } else if position_ms <= segment.start_time_ms {
+                0.0
+            } else {
+                let duration = segment
+                    .end_time_ms
+                    .saturating_sub(segment.start_time_ms)
+                    .max(1);
+                (position_ms.saturating_sub(segment.start_time_ms)) as f32 / duration as f32
+            };
+
+            LyricRenderSegment {
+                text: segment.text.clone(),
+                progress: progress.clamp(0.0, 1.0),
+            }
+        })
+        .collect()
 }
 
 fn find_current_line_index(lines: &[LyricLine], position_ms: u64) -> usize {
@@ -1516,50 +1190,6 @@ fn find_current_line_index(lines: &[LyricLine], position_ms: u64) -> usize {
     lo.saturating_sub(1)
 }
 
-fn line_progress(line: &LyricLine, position_ms: u64) -> f32 {
-    if !line.segments.is_empty() {
-        let total_width: usize = line
-            .segments
-            .iter()
-            .map(|segment| UnicodeWidthStr::width(segment.text.as_str()).max(1))
-            .sum();
-        if total_width == 0 {
-            return 0.0;
-        }
-
-        let mut sung_width = 0.0f32;
-        for segment in &line.segments {
-            let segment_width = UnicodeWidthStr::width(segment.text.as_str()).max(1) as f32;
-            if position_ms >= segment.end_time_ms {
-                sung_width += segment_width;
-                continue;
-            }
-            if position_ms > segment.start_time_ms {
-                let duration = segment.end_time_ms.saturating_sub(segment.start_time_ms).max(1);
-                let segment_progress =
-                    (position_ms.saturating_sub(segment.start_time_ms)) as f32 / duration as f32;
-                sung_width += segment_width * segment_progress.clamp(0.0, 1.0);
-            }
-            break;
-        }
-
-        return (sung_width / total_width as f32).clamp(0.0, 1.0);
-    }
-
-    if position_ms <= line.time_ms {
-        return 0.0;
-    }
-    if position_ms >= line.end_time_ms {
-        return 1.0;
-    }
-
-    let duration = line.end_time_ms.saturating_sub(line.time_ms);
-    if duration == 0 {
-        return 1.0;
-    }
-    ((position_ms - line.time_ms) as f32 / duration as f32).clamp(0.0, 1.0)
-}
-
 fn line_motion(text: &str, font_px: f32, available_px: f32, progress: f32) -> (f32, f32) {
     if text.is_empty() {
         return (0.0, 0.0);
@@ -1573,12 +1203,6 @@ fn line_motion(text: &str, font_px: f32, available_px: f32, progress: f32) -> (f
 
     let overflow = text_px - available_px;
     (0.0, overflow * progress.clamp(0.0, 1.0))
-}
-
-fn is_credit_line(text: &str) -> bool {
-    ["作词", "作曲", "编曲", "制作人", "监制"]
-        .iter()
-        .any(|prefix| text.starts_with(prefix))
 }
 
 fn normalize_for_match(text: &str) -> String {
@@ -1621,30 +1245,6 @@ fn value_to_i32(value: Option<&Value>) -> i32 {
 
 fn shared(text: Option<&str>) -> Value {
     Value::from(SharedString::from(text.unwrap_or_default()))
-}
-
-fn write_preview_data(path: &Path, preview: &PreviewData) {
-    if let Ok(content) = serde_json::to_string_pretty(preview) {
-        let _ = fs::write(path, content);
-    }
-}
-
-fn ensure_settings_file(path: &Path) {
-    if path.exists() {
-        return;
-    }
-
-    let default_content = include_str!("../配置.toml");
-    let _ = fs::write(path, default_content);
-}
-
-fn resolve_config_path(base_dir: &Path, configured: &str) -> PathBuf {
-    let configured_path = PathBuf::from(configured);
-    if configured_path.is_absolute() {
-        configured_path
-    } else {
-        base_dir.join(configured_path)
-    }
 }
 
 fn open_path(path: &Path) {
