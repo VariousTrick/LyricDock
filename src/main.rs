@@ -2,7 +2,8 @@ mod lyrics;
 mod mpris;
 mod settings;
 
-use crate::lyrics::parser::{line_progress, parse_lrc, parse_yrc, LyricLine};
+use crate::lyrics::parser::{line_progress, LyricLine};
+use crate::lyrics::source::read_lyric_file;
 use crate::mpris::{MprisClient, TrackInfo};
 use crate::settings::{
     ensure_preview_file, read_preview_data, resolve_window_state_path, write_preview_data,
@@ -28,6 +29,8 @@ use unicode_width::UnicodeWidthStr;
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{wl_compositor, wl_region, wl_registry, wl_surface};
 use wayland_client::{delegate_noop, Connection as WlConnection, Dispatch, QueueHandle};
+use zbus::blocking::{Connection as DBusConnection, Proxy as DBusProxy};
+use zvariant::OwnedValue;
 
 const SURFACE_NAME: &str = "LyricsOverlay";
 const WINDOW_STATE_FILE: &str = "窗口状态.json";
@@ -124,6 +127,7 @@ struct RuntimeState {
 #[derive(Debug)]
 struct LyricDockTray {
     locked: bool,
+    use_light_icon: bool,
     preview_path: String,
     preview_state: Arc<Mutex<PreviewData>>,
     config_path: String,
@@ -145,7 +149,7 @@ impl ksni::Tray for LyricDockTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![tray_icon()]
+        vec![tray_icon(self.use_light_icon)]
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
@@ -157,7 +161,7 @@ impl ksni::Tray for LyricDockTray {
                 "桌面歌词当前处于可编辑状态".into()
             },
             icon_name: String::new(),
-            icon_pixmap: vec![tray_icon()],
+            icon_pixmap: vec![tray_icon(self.use_light_icon)],
         }
     }
 
@@ -296,6 +300,7 @@ fn main() -> Result<()> {
     let mpris_client = Rc::new(MprisClient::new());
     let tray_handle = LyricDockTray {
         locked: initial_preview.locked.unwrap_or(false),
+        use_light_icon: system_prefers_dark(),
         preview_path: preview_path.to_string_lossy().into_owned(),
         preview_state: Arc::clone(&tray_preview_state),
         config_path: settings.config_path.to_string_lossy().into_owned(),
@@ -883,15 +888,15 @@ fn load_or_fetch_lyrics(
     runtime: &mut RuntimeState,
 ) -> Option<Vec<LyricLine>> {
     if let Some(path) = find_imported_lyric_path(track, &settings.imported_dir) {
-        return read_lyric_file(&path);
+        return read_lyric_file(&path, settings.enable_karaoke);
     }
 
     if let Some(path) = find_cached_lyric_path(track, &settings.cache_dir) {
-        return read_lyric_file(&path);
+        return read_lyric_file(&path, settings.enable_karaoke);
     }
 
     if let Some(path) = find_cached_lyric_path(track, Path::new(LEGACY_LYRICS_DIR)) {
-        return read_lyric_file(&path);
+        return read_lyric_file(&path, settings.enable_karaoke);
     }
 
     let key = track_cache_key(track);
@@ -917,7 +922,7 @@ fn load_or_fetch_lyrics(
 
     find_cached_lyric_path(track, &settings.cache_dir)
         .or_else(|| find_cached_lyric_path(track, Path::new(LEGACY_LYRICS_DIR)))
-        .and_then(|path| read_lyric_file(&path))
+        .and_then(|path| read_lyric_file(&path, settings.enable_karaoke))
 }
 
 fn find_imported_lyric_path(track: &TrackInfo, imported_dir: &Path) -> Option<PathBuf> {
@@ -979,23 +984,6 @@ fn find_cached_lyric_path(track: &TrackInfo, lyrics_dir: &Path) -> Option<PathBu
     }
 
     None
-}
-
-fn read_lyric_file(path: &Path) -> Option<Vec<LyricLine>> {
-    let mut yrc_path = path.to_path_buf();
-    yrc_path.set_extension("yrc");
-    if yrc_path.exists() {
-        if let Ok(content) = fs::read_to_string(&yrc_path) {
-            let lines = parse_yrc(&content);
-            if !lines.is_empty() {
-                return Some(lines);
-            }
-        }
-    }
-
-    let content = fs::read_to_string(path).ok()?;
-    let lines = parse_lrc(&content);
-    (!lines.is_empty()).then_some(lines)
 }
 
 fn parse_hex_color(input: &str) -> Color {
@@ -1341,8 +1329,12 @@ fn cache_file_groups(cache_dir: &Path) -> Vec<CacheFileGroup> {
     groups.into_values().collect()
 }
 
-fn tray_icon() -> ksni::Icon {
-    let bytes = include_bytes!("../assets/tray-icon.png");
+fn tray_icon(use_light_icon: bool) -> ksni::Icon {
+    let bytes = if use_light_icon {
+        include_bytes!("../assets/tray-icon-light.png").as_slice()
+    } else {
+        include_bytes!("../assets/tray-icon-dark.png").as_slice()
+    };
     let image = image::load(Cursor::new(bytes), image::ImageFormat::Png)
         .expect("failed to decode tray icon png")
         .to_rgba8();
@@ -1353,6 +1345,29 @@ fn tray_icon() -> ksni::Icon {
         height,
         data: image.into_raw(),
     }
+}
+
+fn system_prefers_dark() -> bool {
+    let Ok(connection) = DBusConnection::session() else {
+        return false;
+    };
+    let Ok(proxy) = DBusProxy::new(
+        &connection,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Settings",
+    ) else {
+        return false;
+    };
+
+    let Ok(value) = proxy.call::<_, _, OwnedValue>(
+        "Read",
+        &("org.freedesktop.appearance", "color-scheme"),
+    ) else {
+        return false;
+    };
+
+    u32::try_from(value).map(|scheme| scheme == 1).unwrap_or(false)
 }
 
 #[derive(Debug, Deserialize)]

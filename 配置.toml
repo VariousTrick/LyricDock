@@ -7,7 +7,7 @@
 # - 颜色、字体、透明度
 #
 # 程序运行中的窗口位置、大小、锁定状态，
-# 仍然会保存在 `调试面板.json` 里。
+# 仍然会保存在 `窗口状态.json` 里。
 
 # `lyrics_dir`:
 #   歌词根目录。程序会在这个目录下自动创建：
@@ -28,6 +28,12 @@ cache_limit_mb = 256
 #   开启后会显示“当前句 + 下一句”的双行模式。
 #   关闭后只显示当前主歌词。
 show_secondary_line = true
+
+# `enable_karaoke`:
+#   是否启用逐字 / 逐片段 karaoke 效果。
+#   开启后，如果存在同名 `.yrc` 文件，就优先使用逐字时间轴。
+#   关闭后，即使存在 `.yrc`，也会强制退回普通逐行歌词模式。
+enable_karaoke = true
 
 # `use_gradient`:
 #   是否使用渐变填充当前高亮歌词。
@@ -84,4 +90,3 @@ panel_border_color = "#ffffffa1"
 # `resize_handle_color`:
 #   解锁态右下角缩放点颜色。
 resize_handle_color = "#ffffffa8"
-

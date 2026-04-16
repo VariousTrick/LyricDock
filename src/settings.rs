@@ -9,6 +9,7 @@ pub struct AppSettingsFile {
     pub lyrics_dir: Option<String>,
     pub cache_limit_mb: Option<u64>,
     pub show_secondary_line: Option<bool>,
+    pub enable_karaoke: Option<bool>,
     pub use_gradient: Option<bool>,
     pub lyric_effect: Option<String>,
     pub font_family: Option<String>,
@@ -34,6 +35,7 @@ pub struct AppSettings {
     pub cache_dir: PathBuf,
     pub cache_limit_bytes: u64,
     pub show_secondary_line: bool,
+    pub enable_karaoke: bool,
     pub use_gradient: bool,
     pub lyric_effect: String,
     pub font_family: String,
@@ -75,6 +77,10 @@ impl AppSettings {
         let show_secondary_line = parsed
             .as_ref()
             .and_then(|settings| settings.show_secondary_line)
+            .unwrap_or(true);
+        let enable_karaoke = parsed
+            .as_ref()
+            .and_then(|settings| settings.enable_karaoke)
             .unwrap_or(true);
         let use_gradient = parsed
             .as_ref()
@@ -152,6 +158,7 @@ impl AppSettings {
             cache_dir,
             cache_limit_bytes: cache_limit_mb.saturating_mul(1024 * 1024),
             show_secondary_line,
+            enable_karaoke,
             use_gradient,
             lyric_effect,
             font_family,

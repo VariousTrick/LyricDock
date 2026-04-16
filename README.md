@@ -29,12 +29,14 @@
   配置文件与窗口状态文件读写
 - `assets/app-icon.png`
   程序图标 PNG
-- `assets/tray-icon.png`
-  托盘图标 PNG
+- `assets/tray-icon-light.png`
+  深色系统主题下使用的亮色托盘图标 PNG
+- `assets/tray-icon-dark.png`
+  浅色系统主题下使用的暗色托盘图标 PNG
 - `开发计划.md`
   当前开发计划
 - `配置.toml`
-  主配置文件，带中文注释，可手动填写歌词目录、缓存上限和第二行开关
+  主配置文件，带中文注释，可手动填写歌词目录、缓存上限、第二行开关和 karaoke 开关
 - `窗口状态.json`
   当前本地窗口状态文件
 
@@ -86,6 +88,7 @@ cargo run
 
 - 当前通过 [配置.toml](/home/Arch/Downloads/vscode/LyricDock/配置.toml) 指定歌词根目录
 - 可以通过 `show_secondary_line = true/false` 控制是否显示第二行歌词
+- 可以通过 `enable_karaoke = true/false` 控制是否启用逐字 / 逐片段 karaoke
 - 可以通过 `use_gradient = true/false` 控制歌词高亮使用渐变还是纯色，默认纯色
 - 可以通过 `lyric_effect = "flat"/"floating"` 切换平面全描边和轻微浮动两种效果
 - 颜色、描边、面板底色、歌词透明度现在都可以直接在 `配置.toml` 中手动填写
@@ -101,6 +104,7 @@ cargo run
 ## 当前托盘能力
 
 - 托盘图标改为你选的两版 PNG 图标
+- 会根据系统深浅色偏好自动切换亮色 / 暗色托盘图标
 - 可以通过托盘菜单锁定歌词
 - 锁定后可以通过托盘再次解锁
 - 也可以通过面板上的“锁定”按钮进入锁定状态
@@ -128,6 +132,7 @@ cargo run
 当前版本仍有这些限制：
 
 - 并不是每首歌都有 `yrc`，没有逐字歌词的歌曲会自动退回普通逐行模式
+- 如果你关闭 `enable_karaoke`，程序会强制退回普通逐行模式，便于对比或排查显示问题
 - 行2默认作为下一句预告，暂未做翻译行对齐
 - 双行模式当前仍未加入更明显的句间位移动画
 - 拉词流程仍使用外部脚本调用，后续可改为异步任务
